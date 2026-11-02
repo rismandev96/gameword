@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tebak Kata</title>
-  <meta name="description" content="Game tebak kata bahasa Inggris: mode Vocab (pilih kata) dan mode Speaking (kata otomatis).">
+  <meta name="description" content="Game tebak kata bahasa Inggris dari 2048 kata BIP-39: mode Vocab (pilih kata) dan mode Speaking (kata otomatis).">
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="mode-vocab">
   <header class="top">
     <div class="brand">
       <h1>Tebak Kata</h1>
-      <p class="sub only-vocab">Mode Vocab: huruf diacak otomatis, kamu pilih kata (noun / verb bentuk dasar) untuk tiap huruf.</p>
-      <p class="sub only-speak">Mode Speaking: 24 kata (noun) langsung muncul otomatis. Ucapkan satu per satu, klik kata untuk dengar pelafalannya.</p>
+      <p class="sub only-vocab">Mode Vocab: huruf diacak otomatis, kamu pilih kata dari daftar BIP-39 untuk tiap huruf.</p>
+      <p class="sub only-speak">Mode Speaking: 24 kata BIP-39 langsung muncul otomatis. Ucapkan satu per satu, klik kata untuk dengar pelafalannya.</p>
     </div>
   </header>
 
@@ -64,11 +64,6 @@
       </div>
       <div class="dict-tools">
         <input id="search" type="search" placeholder="Cari kata… (Enter = pilih yang pertama)" autocomplete="off" spellcheck="false">
-        <div class="filters" role="radiogroup" aria-label="Jenis kata">
-          <button class="chip-f active" data-pos="all">Semua</button>
-          <button class="chip-f" data-pos="n">Noun</button>
-          <button class="chip-f" data-pos="v">Verb</button>
-        </div>
         <select id="sortSel" aria-label="Urutan kamus">
           <option value="az">A–Z</option>
           <option value="common">Paling umum</option>
@@ -94,7 +89,7 @@
     </div>
   </section>
 
-  <footer class="foot">Kamus: kata umum bahasa Inggris yang tercatat sebagai noun / verb bentuk dasar di WordNet. Bentuk V2/V3 (went, broken, …) tidak dipakai.</footer>
+  <footer class="foot">Kamus: 2048 kata daftar BIP-39 bahasa Inggris. Ini latihan kosakata, jangan pakai hasilnya sebagai seed phrase dompet kripto.</footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>

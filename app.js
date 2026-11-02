@@ -1,10 +1,7 @@
 (() => {
   'use strict';
 
-  const STORE_KEY = 'tebak-kata-v2';
-  const MIN_WORDS_PER_LETTER = 15;  // huruf dengan kata terlalu sedikit (mis. x) tidak dipakai
-  const COMMON_RANK = 12000;        // rank < ini = kata umum
-  const SPEAK_PURE_NOUN_RATIO = 0.8; // mode speaking: 80% noun murni, sisanya kata yang noun sekaligus verb 1
+  const STORE_KEY = 'tebak-kata-v3';
 
   const $ = (id) => document.getElementById(id);
   const el = {
@@ -13,12 +10,11 @@
     outLetters: $('outLetters'), outLines: $('outLines'), outJoined: $('outJoined'), toast: $('toast'),
   };
 
-  let DICT = {};        // { a: [[word, pos, rank], ...] }  pos: 'n' | 'v' | 'nv'
-  let VOCAB_LETTERS = [], VOCAB_W = [];
-  let SPEAK_LETTERS = [], SPEAK_W = [];
+  let DICT = {};        // { a: [[word, rank], ...] }  — 2048 kata BIP-39
+  let LETTERS = [], WEIGHTS = [];
 
   const blankGame = () => ({ count: 24, letters: [], words: [], active: 0 });
-  let state = { mode: 'vocab', pos: 'all', sort: 'az', vocab: blankGame(), speak: blankGame() };
+  let state = { mode: 'vocab', sort: 'az', vocab: blankGame(), speak: blankGame() };
   const game = () => state[state.mode];
 
   // ---------- util ----------
@@ -36,8 +32,14 @@
   };
   const pad = (n) => String(n + 1).padStart(2, '0');
 
-  // kata yang boleh dipakai di mode speaking: hanya noun (termasuk verb 1 yang juga noun), kata umum
-  const speakPool = (letter) => (DICT[letter] || []).filter((w) => w[1].includes('n') && w[2] < COMMON_RANK);
+  const pickLetter = () => pickWeighted(LETTERS, WEIGHTS);
+  const wordsFor = (letter) => DICT[letter] || [];
+
+  // kata acak untuk huruf tertentu, sebisa mungkin belum dipakai di slot lain
+  function randomWordFor(letter, used) {
+    const fresh = wordsFor(letter).filter((w) => !used.has(w[0]));
+    return pick(fresh.length ? fresh : wordsFor(letter))[0];
+  }
 
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (_) {}
@@ -50,7 +52,6 @@
       const s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
       if (!s) return;
       state.mode = s.mode === 'speak' ? 'speak' : 'vocab';
-      state.pos = s.pos || 'all';
       state.sort = s.sort || 'az';
       for (const m of ['vocab', 'speak']) {
         if (validGame(s[m])) {
@@ -73,24 +74,14 @@
   function newVocab(count) {
     const g = state.vocab;
     g.count = count;
-    g.letters = Array.from({ length: count }, () => pickWeighted(VOCAB_LETTERS, VOCAB_W));
+    g.letters = Array.from({ length: count }, pickLetter);
     g.words = Array(count).fill('');
     g.active = 0;
   }
 
-  function wordsFor(letter, pos = 'all') {
-    const list = DICT[letter] || [];
-    return pos === 'all' ? list : list.filter((w) => w[1].includes(pos));
-  }
-
   function randomVocabWord(i) {
     const g = state.vocab;
-    const used = new Set(g.words.filter(Boolean));
-    let pool = wordsFor(g.letters[i]).filter((w) => !used.has(w[0]));
-    const common = pool.filter((w) => w[2] < COMMON_RANK);
-    if (common.length) pool = common;
-    if (!pool.length) pool = wordsFor(g.letters[i]);
-    return pick(pool)[0];
+    return randomWordFor(g.letters[i], new Set(g.words.filter(Boolean)));
   }
 
   function nextEmpty(g, from) {
@@ -110,23 +101,13 @@
   }
 
   // ---------- mode 2: speaking ----------
-  function speakWordFor(letter, used) {
-    const pool = speakPool(letter).filter((w) => !used.has(w[0]));
-    const pure = pool.filter((w) => w[1] === 'n');
-    const both = pool.filter((w) => w[1] === 'nv');
-    let src = randFloat() < SPEAK_PURE_NOUN_RATIO ? pure : both;
-    if (!src.length) src = pure.length ? pure : both;
-    if (!src.length) src = speakPool(letter);
-    return pick(src)[0];
-  }
-
   function newSpeak(count) {
     const g = state.speak;
     g.count = count;
-    g.letters = Array.from({ length: count }, () => pickWeighted(SPEAK_LETTERS, SPEAK_W));
+    g.letters = Array.from({ length: count }, pickLetter);
     const used = new Set();
     g.words = g.letters.map((l) => {
-      const w = speakWordFor(l, used);
+      const w = randomWordFor(l, used);
       used.add(w);
       return w;
     });
@@ -217,20 +198,19 @@
     el.dictTitle.textContent = `Huruf ${letter.toUpperCase()} · slot ${pad(i)}`;
 
     const q = el.search.value.trim().toLowerCase();
-    const all = wordsFor(letter, state.pos);
+    const all = wordsFor(letter);
     let list = q ? all.filter((w) => w[0].includes(q)) : all;
-    const byOrder = state.sort === 'common' ? (a, b) => a[2] - b[2] : (a, b) => a[0].localeCompare(b[0]);
+    const byOrder = state.sort === 'common' ? (a, b) => a[1] - b[1] : (a, b) => a[0].localeCompare(b[0]);
     list = [...list].sort((a, b) => (q ? b[0].startsWith(q) - a[0].startsWith(q) : 0) || byOrder(a, b));
     el.dictMeta.textContent = q ? `${list.length} dari ${all.length} kata cocok` : `${all.length} kata`;
 
     const used = new Set(g.words.filter(Boolean));
     const current = g.words[i];
     const frag = document.createDocumentFragment();
-    for (const [word, pos] of list) {
+    for (const [word] of list) {
       const b = document.createElement('button');
       b.className = 'w' + (word === current ? ' picked' : used.has(word) ? ' used' : '');
-      b.innerHTML = `<span></span><small>${pos === 'nv' ? 'n·v' : pos}</small>`;
-      b.firstChild.textContent = word;
+      b.textContent = word;
       b.onclick = () => setWord(i, word);
       frag.appendChild(b);
     }
@@ -324,7 +304,7 @@
       const g = state.vocab;
       const i = g.active;
       let l;
-      do { l = pickWeighted(VOCAB_LETTERS, VOCAB_W); } while (l === g.letters[i]);
+      do { l = pickLetter(); } while (l === g.letters[i] && LETTERS.length > 1);
       g.letters[i] = l;
       g.words[i] = '';
       render();
@@ -334,14 +314,6 @@
       if (e.key === 'Enter') el.wordList.querySelector('.w')?.click();
     };
     $('sortSel').onchange = (e) => { state.sort = e.target.value; renderDict(); save(); };
-    document.querySelectorAll('.chip-f').forEach((b) => {
-      b.onclick = () => {
-        state.pos = b.dataset.pos;
-        document.querySelectorAll('.chip-f').forEach((x) => x.classList.toggle('active', x === b));
-        renderDict();
-        save();
-      };
-    });
     document.querySelectorAll('[data-copy]').forEach((b) => {
       b.onclick = async () => {
         const text = $(b.dataset.copy).textContent;
@@ -364,17 +336,14 @@
   async function init() {
     const res = await fetch('words.json');
     DICT = await res.json();
-    // bobot huruf = akar jumlah kata, supaya huruf langka (q, z, y) tidak terlalu sering muncul
-    VOCAB_LETTERS = Object.keys(DICT).filter((l) => DICT[l].length >= MIN_WORDS_PER_LETTER);
-    VOCAB_W = VOCAB_LETTERS.map((l) => Math.sqrt(DICT[l].length));
-    SPEAK_LETTERS = Object.keys(DICT).filter((l) => speakPool(l).length >= MIN_WORDS_PER_LETTER);
-    SPEAK_W = SPEAK_LETTERS.map((l) => Math.sqrt(speakPool(l).length));
+    // bobot huruf = akar jumlah kata, supaya huruf langka (q, y, z) tidak terlalu sering muncul
+    LETTERS = Object.keys(DICT);
+    WEIGHTS = LETTERS.map((l) => Math.sqrt(DICT[l].length));
 
     load();
     if (!state.vocab.letters.length) newVocab(24);
     if (!state.speak.letters.length) newSpeak(24);
     $('sortSel').value = state.sort;
-    document.querySelectorAll('.chip-f').forEach((x) => x.classList.toggle('active', x.dataset.pos === state.pos));
     bind();
     render();
   }
