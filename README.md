@@ -6,7 +6,10 @@ Webapp statis (HTML + CSS + JS, tanpa backend) untuk latihan kosakata bahasa Ing
 
 Semua kata diambil dari **daftar BIP-39 bahasa Inggris (2048 kata)** dan dibentuk lewat proses BIP-39 asli:
 
-1. entropy acak 128–256 bit (12–24 kata)
+1. entropy 128–256 bit (12–24 kata) dari **lempar koin** (Angka = 1, Gambar = 0) atau **lempar dadu**
+   (1→00, 2→01, 3→10, 4→11, 5→0, 6→1, aturan tanpa bias). Default-nya simulasi acak; bisa juga koin/dadu asli
+   yang dicatat manual (klik atau keyboard). Ada cek pola (jumlah 1 vs 0, deret terpanjang, terlalu sering berganti)
+   untuk menunjukkan kenapa angka "karangan kepala" tidak aman.
 2. SHA-256 dari entropy
 3. checksum = ENT/32 bit pertama hasil hash
 4. entropy + checksum digabung
@@ -18,7 +21,8 @@ Semua langkah ditampilkan di panel **Simulasi matematis BIP-39**.
 - **Vocab (pilih kata)**: huruf berasal dari frasa BIP-39 valid yang disembunyikan. Siswa memilih kata untuk tiap huruf,
   lalu **Cek jawaban** (benar/salah per kata + cek checksum kebalikannya) dan **Tampilkan jawaban** (simulasi lengkap).
 - **Speaking (otomatis)**: frasa langsung muncul. Klik kata untuk mendengar pelafalannya, atau "Dengarkan semua".
-  Bisa juga memasukkan entropy sendiri (biner/hex), atau tekan **Contoh materi** (indeks 1–11 + 7 bit nol).
+  Sumber entropy bisa dipilih: koin/dadu otomatis, koin/dadu asli (manual), atau ketik entropy (termasuk **Contoh materi**:
+  indeks 1–11 + 7 bit nol, yang hasil kata ke-12-nya *absent*).
 
 Hasilnya ditampilkan di bawah: urutan huruf, kata per baris, dan gabungan dengan spasi (masing-masing bisa disalin).
 

@@ -63,6 +63,50 @@
     return bytes;
   }
 
+  // ---- sumber entropy fisik (disimulasikan dengan generator acak kriptografis browser) ----
+  function randomInt(n) {
+    // tanpa bias modulo: buang nilai di luar kelipatan n
+    const lim = Math.floor(2 ** 32 / n) * n;
+    const a = new Uint32Array(1);
+    do { crypto.getRandomValues(a); } while (a[0] >= lim);
+    return a[0] % n;
+  }
+
+  // Lempar koin: Angka = 1, Gambar = 0. Satu lemparan = 1 bit.
+  const randomCoins = (n) => Array.from({ length: n }, () => randomInt(2));
+  const coinsToBits = (coins) => coins.join('');
+
+  // Lempar dadu: 1→00, 2→01, 3→10, 4→11, 5→0, 6→1.
+  // Tanpa bias: kalau keluar 1–4, keempat pola 2-bit sama peluangnya; kalau keluar 5–6, bit 0/1 sama peluangnya.
+  const DICE_BITS = { 1: '00', 2: '01', 3: '10', 4: '11', 5: '0', 6: '1' };
+  const diceToBits = (faces) => faces.map((f) => DICE_BITS[f]).join('');
+  function randomDice(entBits) {
+    const faces = [];
+    while (diceToBits(faces).length < entBits) faces.push(randomInt(6) + 1);
+    return faces;
+  }
+
+  // statistik sederhana untuk mendeteksi pola "buatan manusia"
+  function bitStats(bits) {
+    const ones = (bits.match(/1/g) || []).length;
+    let longest = 0, run = 0;
+    for (let i = 0; i < bits.length; i++) {
+      run = i && bits[i] === bits[i - 1] ? run + 1 : 1;
+      if (run > longest) longest = run;
+    }
+    let alternations = 0;
+    for (let i = 1; i < bits.length; i++) if (bits[i] !== bits[i - 1]) alternations++;
+    const n = bits.length;
+    const warnings = [];
+    if (Math.abs(ones - n / 2) > 3 * Math.sqrt(n) / 2) warnings.push(`jumlah 1 dan 0 terlalu timpang (${ones} vs ${n - ones})`);
+    if (longest > Math.log2(n) + 6) warnings.push(`ada deret angka sama sepanjang ${longest}`);
+    if (longest < Math.log2(n) - 3) warnings.push(`deret terpanjang cuma ${longest}; hasil acak asli biasanya punya deret lebih panjang (sekitar ${Math.round(Math.log2(n))})`);
+    const altRatio = alternations / (n - 1);
+    if (altRatio > 0.65) warnings.push('angka terlalu sering berganti (mirip pola 1010…)');
+    if (altRatio < 0.35) warnings.push('angka terlalu jarang berganti');
+    return { n, ones, zeros: n - ones, longest, alternations, warnings };
+  }
+
   // Ubah teks biner (0/1) atau hex menjadi byte entropy. Panjang harus 128/160/192/224/256 bit.
   function parseEntropy(text) {
     const t = text.replace(/\s+/g, '').toLowerCase();
@@ -110,5 +154,8 @@
     return { ok: given === expected, ENT, CS, entBits, given, expected, hashHex: bytesToHex(hash), idx, all };
   }
 
-  global.BIP39 = { sha256, bytesToBin, bytesToHex, binToBytes, entBitsFor, randomEntropy, parseEntropy, fromEntropy, check };
+  global.BIP39 = {
+    sha256, bytesToBin, bytesToHex, binToBytes, entBitsFor, randomEntropy, parseEntropy, fromEntropy, check,
+    randomInt, randomCoins, coinsToBits, randomDice, diceToBits, DICE_BITS, bitStats,
+  };
 })(window);
