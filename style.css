@@ -232,3 +232,4 @@ code.break { word-break: break-all; }
 .progress-bar span { display: block; height: 100%; background: var(--accent); transition: width .15s; }
 kbd { background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 12px; }
 .warn-box { background: rgba(242, 184, 75, 0.12); color: var(--warn); border-radius: 8px; padding: 8px 12px; margin: 6px 0; font-size: 14px; }
+body.busy, body.busy button { cursor: progress; }

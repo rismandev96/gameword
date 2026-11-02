@@ -57,34 +57,14 @@
   // jumlah kata -> panjang entropy (bit). 12 kata = 128 bit, 24 kata = 256 bit.
   const entBitsFor = (wordCount) => (wordCount * 11 * 32) / 33;
 
-  function randomEntropy(wordCount) {
-    const bytes = new Uint8Array(entBitsFor(wordCount) / 8);
-    crypto.getRandomValues(bytes);
-    return bytes;
-  }
-
-  // ---- sumber entropy fisik (disimulasikan dengan generator acak kriptografis browser) ----
-  function randomInt(n) {
-    // tanpa bias modulo: buang nilai di luar kelipatan n
-    const lim = Math.floor(2 ** 32 / n) * n;
-    const a = new Uint32Array(1);
-    do { crypto.getRandomValues(a); } while (a[0] >= lim);
-    return a[0] % n;
-  }
-
-  // Lempar koin: Angka = 1, Gambar = 0. Satu lemparan = 1 bit.
-  const randomCoins = (n) => Array.from({ length: n }, () => randomInt(2));
+  // Pengacakan TIDAK dilakukan di sini (bukan crypto.getRandomValues browser).
+  // Lemparan koin/dadu otomatis dibuat server Python (api/entropy.py); file ini hanya menghitung.
   const coinsToBits = (coins) => coins.join('');
 
   // Lempar dadu: 1→00, 2→01, 3→10, 4→11, 5→0, 6→1.
   // Tanpa bias: kalau keluar 1–4, keempat pola 2-bit sama peluangnya; kalau keluar 5–6, bit 0/1 sama peluangnya.
   const DICE_BITS = { 1: '00', 2: '01', 3: '10', 4: '11', 5: '0', 6: '1' };
   const diceToBits = (faces) => faces.map((f) => DICE_BITS[f]).join('');
-  function randomDice(entBits) {
-    const faces = [];
-    while (diceToBits(faces).length < entBits) faces.push(randomInt(6) + 1);
-    return faces;
-  }
 
   // statistik sederhana untuk mendeteksi pola "buatan manusia"
   function bitStats(bits) {
@@ -155,7 +135,7 @@
   }
 
   global.BIP39 = {
-    sha256, bytesToBin, bytesToHex, binToBytes, entBitsFor, randomEntropy, parseEntropy, fromEntropy, check,
-    randomInt, randomCoins, coinsToBits, randomDice, diceToBits, DICE_BITS, bitStats,
+    sha256, bytesToBin, bytesToHex, binToBytes, entBitsFor, parseEntropy, fromEntropy, check,
+    coinsToBits, diceToBits, DICE_BITS, bitStats,
   };
 })(window);

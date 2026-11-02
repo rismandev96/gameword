@@ -30,17 +30,27 @@ Hasilnya ditampilkan di bawah: urutan huruf, kata per baris, dan gabungan dengan
 
 > Ini alat belajar. Frasa yang tampil di layar dan tersimpan di browser **tidak aman**, jangan pernah dipakai untuk dompet kripto sungguhan.
 
+## Pengacakan: server Python
+
+Lemparan koin/dadu otomatis (dan tombol "Kata acak") dibuat oleh **Vercel Python Function** `api/entropy.py`
+memakai modul `secrets` (pengacak kriptografis). Modul `random` sengaja tidak dipakai karena hasilnya bisa ditebak.
+Browser tidak mengacak apa pun; `bip39.js` hanya menghitung SHA-256, checksum, dan pemetaan kata.
+
+- `GET /api/entropy?kind=coin&bits=128` → `{"values": [0,1,1,...]}` (Angka = 1, Gambar = 0)
+- `GET /api/entropy?kind=dice&bits=128` → `{"values": [3,6,1,...]}`
+- `GET /api/entropy?kind=u32&count=24` → bilangan acak 32-bit
+
 ## Jalankan lokal
 
 ```bash
-python3 -m http.server 8000
+python3 dev_server.py
 ```
 
-Lalu buka http://localhost:8000
+Lalu buka http://localhost:8000 (`dev_server.py` melayani file statis + `/api/entropy` dengan kode yang sama).
 
 ## Deploy ke Vercel
 
-Import repo ini di Vercel, framework preset **Other**, tanpa build command, output directory `.` (root). Selesai.
+Import repo ini di Vercel, framework preset **Other**, tanpa build command. Folder `api/` otomatis jadi Python Function.
 
 ## Kamus (`words.json`)
 

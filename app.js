@@ -26,11 +26,6 @@
   // ---------- util ----------
   const pad = (n) => String(n + 1).padStart(2, '0');
   const hexToBytes = (hex) => Uint8Array.from(hex.match(/.{2}/g) || [], (h) => parseInt(h, 16));
-  const pick = (arr) => {
-    const a = new Uint32Array(1);
-    crypto.getRandomValues(a);
-    return arr[a[0] % arr.length];
-  };
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   function save() {
@@ -82,15 +77,37 @@
     g.checked = false;
     g.revealed = false;
   }
-  // Entropy dibuat seperti cara fisik: lempar koin (1 lemparan = 1 bit) atau lempar dadu, hasilnya acak.
-  function newGame(mode, count, kind = 'coin') {
-    const ent = BIP39.entBitsFor(count);
-    if (kind === 'dice') {
-      const faces = BIP39.randomDice(ent);
-      loadEntropy(mode, BIP39.binToBytes(BIP39.diceToBits(faces).slice(0, ent)), { type: 'dice', values: faces });
-    } else {
-      const coins = BIP39.randomCoins(ent);
-      loadEntropy(mode, BIP39.binToBytes(BIP39.coinsToBits(coins)), { type: 'coin', values: coins });
+  // Entropy dibuat seperti cara fisik: lempar koin (1 lemparan = 1 bit) atau lempar dadu.
+  // Lemparan acaknya dibuat oleh server Python (api/entropy.py, modul `secrets`), bukan oleh browser.
+  async function fetchTosses(kind, bits) {
+    const res = await fetch(`api/entropy?kind=${kind}&bits=${bits}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`server ${res.status}`);
+    const data = await res.json();
+    const v = data.values;
+    const okVal = (x) => Number.isInteger(x) && (kind === 'coin' ? x === 0 || x === 1 : x >= 1 && x <= 6);
+    const got = Array.isArray(v) && v.every(okVal) ? (kind === 'coin' ? v.length : BIP39.diceToBits(v).length) : 0;
+    if (got < bits) throw new Error('jawaban server tidak valid');
+    return v;
+  }
+
+  let busy = false;
+  async function newGame(mode, count, kind = 'coin') {
+    if (busy) return false;
+    busy = true;
+    document.body.classList.add('busy');
+    try {
+      const ent = BIP39.entBitsFor(count);
+      const values = await fetchTosses(kind, ent);
+      const bits = kind === 'dice' ? BIP39.diceToBits(values) : BIP39.coinsToBits(values);
+      loadEntropy(mode, BIP39.binToBytes(bits.slice(0, ent)), { type: kind, values, python: true });
+      return true;
+    } catch (err) {
+      console.error(err);
+      toast('Gagal mengambil angka acak dari server Python (' + err.message + ')');
+      return false;
+    } finally {
+      busy = false;
+      document.body.classList.remove('busy');
     }
   }
   const autoKind = () => (state.source === 'dice' || state.source === 'mdice' ? 'dice' : 'coin');
@@ -112,12 +129,29 @@
     render();
   }
 
-  function randomVocabWord(i) {
+  // bilangan acak untuk tombol bantuan juga dari server Python
+  async function pythonNumbers(count) {
+    const res = await fetch(`api/entropy?kind=u32&count=${count}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`server ${res.status}`);
+    const v = (await res.json()).values;
+    if (!Array.isArray(v) || v.length !== count || !v.every(Number.isInteger)) throw new Error('jawaban server tidak valid');
+    return v;
+  }
+
+  // isi slot-slot kosong dengan kata acak berawalan huruf yang sesuai
+  async function fillRandom(slots) {
+    if (!slots.length) return;
+    let nums;
+    try { nums = await pythonNumbers(slots.length); }
+    catch (err) { toast('Gagal mengambil angka acak dari server Python (' + err.message + ')'); return; }
     const g = state.vocab;
-    const used = new Set(g.words.filter(Boolean));
-    const list = DICT[g.letters[i]];
-    const fresh = list.filter((w) => !used.has(w));
-    return pick(fresh.length ? fresh : list);
+    slots.forEach((i, k) => {
+      const used = new Set(g.words.filter((w, j) => w && j !== i));
+      const list = DICT[g.letters[i]];
+      const fresh = list.filter((w) => !used.has(w));
+      const pool = fresh.length ? fresh : list;
+      g.words[i] = pool[nums[k] % pool.length];
+    });
   }
 
   // ---------- mode 2: speaking (suara) ----------
@@ -265,7 +299,7 @@
   const DICE_LEGEND = `<div class="dice-legend">${[1, 2, 3, 4, 5, 6].map((f) => `<span><i>${DIE_FACE[f]}</i> ${f} → <code>${BIP39.DICE_BITS[f]}</code></span>`).join('')}</div>`;
 
   function entropySourceHTML(ENT, src) {
-    const how = src?.manual ? 'dilempar sungguhan lalu dicatat' : 'disimulasikan (acak)';
+    const how = src?.manual ? 'dilempar sungguhan lalu dicatat' : src?.python ? 'disimulasikan oleh server Python (modul secrets)' : 'disimulasikan';
     if (src?.type === 'coin' && src.values?.length) {
       return `<p>Koin ${how} sebanyak <b>${src.values.length} kali</b>. <b>Angka = 1</b>, <b>Gambar = 0</b>. Satu lemparan = 1 bit.</p>
         <div class="tosses">${src.values.map(coinHTML).join('')}</div>`;
@@ -355,7 +389,7 @@
 
   // ---- panel sumber entropy (mode speaking) ----
   const SOURCES = [
-    ['coin', 'Koin (acak otomatis)'], ['dice', 'Dadu (acak otomatis)'],
+    ['coin', 'Koin (acak Python)'], ['dice', 'Dadu (acak Python)'],
     ['mcoin', 'Koin asli (catat manual)'], ['mdice', 'Dadu asli (catat manual)'], ['input', 'Ketik entropy'],
   ];
 
@@ -371,7 +405,7 @@
     let body = '';
     if (state.source === 'coin' || state.source === 'dice') {
       const what = state.source === 'coin' ? `koin ${ent} kali` : 'dadu sampai dapat ' + ent + ' bit';
-      body = `<p class="muted">Komputer mensimulasikan lempar ${what} secara acak.</p>
+      body = `<p class="muted">Server Python (<code>secrets</code>) mensimulasikan lempar ${what} secara acak.</p>
         <button class="btn small primary" data-act="auto">Lempar lagi</button>`;
     } else if (state.source === 'mcoin' || state.source === 'mdice') {
       const bits = manualBits().length;
@@ -487,11 +521,16 @@
   // ---------- events ----------
   function bind() {
     document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => setMode(t.dataset.mode); });
-    el.countSel.onchange = () => { stopSpeaking(); state.manual = []; newGame(state.mode, +el.countSel.value, state.mode === 'speak' ? autoKind() : 'coin'); render(); };
-    $('btnNewLetters').onclick = () => { newGame('vocab', +el.countSel.value); render(); toast('Frasa baru dibuat, huruf diacak'); };
-    $('btnFillAll').onclick = () => {
+    el.countSel.onchange = async () => {
+      stopSpeaking();
+      state.manual = [];
+      await newGame(state.mode, +el.countSel.value, state.mode === 'speak' ? autoKind() : 'coin');
+      render();
+    };
+    $('btnNewLetters').onclick = async () => { if (await newGame('vocab', +el.countSel.value)) { render(); toast('Frasa baru dibuat, huruf diacak'); } };
+    $('btnFillAll').onclick = async () => {
       const g = state.vocab;
-      g.words.forEach((w, i) => { if (!w) g.words[i] = randomVocabWord(i); });
+      await fillRandom(g.words.map((w, i) => (w ? -1 : i)).filter((i) => i >= 0));
       render();
     };
     $('btnClear').onclick = () => {
@@ -515,11 +554,17 @@
       render();
       if (g.revealed) $('sim').scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
-    $('btnGenerate').onclick = () => { stopSpeaking(); newGame('speak', +el.countSel.value, autoKind()); render(); toast('Frasa baru dibuat'); };
+    $('btnGenerate').onclick = async () => { stopSpeaking(); if (await newGame('speak', +el.countSel.value, autoKind())) { render(); toast('Frasa baru dibuat'); } };
     $('btnSpeakAll').onclick = speakAll;
-    $('btnRandomWord').onclick = () => setWord(state.vocab.active, randomVocabWord(state.vocab.active), false);
+    $('btnRandomWord').onclick = async () => {
+      const g = state.vocab;
+      g.words[g.active] = '';
+      await fillRandom([g.active]);
+      el.search.value = '';
+      render();
+    };
 
-    $('entTools').onclick = (e) => {
+    $('entTools').onclick = async (e) => {
       const b = e.target.closest('button');
       if (!b) return;
       if (b.dataset.src) {
@@ -529,7 +574,7 @@
         return;
       }
       const act = b.dataset.act;
-      if (act === 'auto') { stopSpeaking(); newGame('speak', +el.countSel.value, autoKind()); render(); }
+      if (act === 'auto') { stopSpeaking(); if (await newGame('speak', +el.countSel.value, autoKind())) render(); }
       else if (act === 'v') addManual(+b.dataset.v);
       else if (act === 'undo') { state.manual.pop(); render(); }
       else if (act === 'reset') { state.manual = []; render(); }
@@ -590,8 +635,11 @@
     });
 
     load();
-    if (!state.vocab.entHex) newGame('vocab', 24);
-    if (!state.speak.entHex) newGame('speak', 24);
+    for (const m of ['vocab', 'speak']) {
+      if (state[m].entHex) continue;
+      // kalau server Python belum bisa dihubungi, pakai contoh materi dulu supaya halaman tetap tampil
+      if (!(await newGame(m, 24))) loadEntropy(m, BIP39.binToBytes(exampleEntropyBits()), { type: 'input', values: [] });
+    }
     $('sortSel').value = state.sort;
     bind();
     render();
