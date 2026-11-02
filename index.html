@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tebak Kata</title>
+  <meta name="description" content="Game tebak kata bahasa Inggris: mode Vocab (pilih kata) dan mode Speaking (kata otomatis).">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="mode-vocab">
+  <header class="top">
+    <div class="brand">
+      <h1>Tebak Kata</h1>
+      <p class="sub only-vocab">Mode Vocab: huruf diacak otomatis, kamu pilih kata (noun / verb bentuk dasar) untuk tiap huruf.</p>
+      <p class="sub only-speak">Mode Speaking: 24 kata (noun) langsung muncul otomatis. Ucapkan satu per satu, klik kata untuk dengar pelafalannya.</p>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" role="tab" data-mode="vocab">1 · Vocab <span>pilih kata</span></button>
+    <button class="tab" role="tab" data-mode="speak">2 · Speaking <span>otomatis</span></button>
+  </nav>
+
+  <div class="controls">
+    <label class="count">
+      Jumlah kata
+      <select id="countSel">
+        <option value="12">12</option>
+        <option value="18">18</option>
+        <option value="24" selected>24</option>
+      </select>
+    </label>
+    <button id="btnNewLetters" class="btn primary only-vocab">Acak huruf baru</button>
+    <button id="btnFillAll" class="btn only-vocab">Isi kosong secara acak</button>
+    <button id="btnClear" class="btn ghost only-vocab">Hapus pilihan</button>
+    <button id="btnGenerate" class="btn primary only-speak">Generate baru</button>
+    <button id="btnSpeakAll" class="btn only-speak">Dengarkan semua</button>
+  </div>
+
+  <section class="sequence-wrap">
+    <div class="label-row">
+      <span class="label">Huruf yang harus ditebak</span>
+      <span id="progress" class="progress"></span>
+    </div>
+    <div id="sequence" class="sequence" aria-label="Urutan huruf"></div>
+  </section>
+
+  <main class="layout">
+    <section class="slots-wrap">
+      <div class="label-row"><span class="label">Kata</span></div>
+      <div id="slots" class="slots"></div>
+    </section>
+
+    <section class="dict only-vocab" id="dict">
+      <div class="dict-head">
+        <div>
+          <div class="label">Kamus</div>
+          <h2 id="dictTitle">Huruf N</h2>
+        </div>
+        <div class="dict-actions">
+          <button id="btnRandomWord" class="btn small">Kata acak</button>
+          <button id="btnRerollLetter" class="btn small ghost" title="Ganti huruf di slot ini">Ganti huruf</button>
+        </div>
+      </div>
+      <div class="dict-tools">
+        <input id="search" type="search" placeholder="Cari kata… (Enter = pilih yang pertama)" autocomplete="off" spellcheck="false">
+        <div class="filters" role="radiogroup" aria-label="Jenis kata">
+          <button class="chip-f active" data-pos="all">Semua</button>
+          <button class="chip-f" data-pos="n">Noun</button>
+          <button class="chip-f" data-pos="v">Verb</button>
+        </div>
+        <select id="sortSel" aria-label="Urutan kamus">
+          <option value="az">A–Z</option>
+          <option value="common">Paling umum</option>
+        </select>
+      </div>
+      <div id="dictMeta" class="dict-meta"></div>
+      <div id="wordList" class="word-list"></div>
+    </section>
+  </main>
+
+  <section class="output">
+    <div class="out-block">
+      <div class="out-head"><span class="label">Urutan huruf</span><button class="btn small" data-copy="outLetters">Salin</button></div>
+      <pre id="outLetters" class="out"></pre>
+    </div>
+    <div class="out-block">
+      <div class="out-head"><span class="label">Kata per baris</span><button class="btn small" data-copy="outLines">Salin</button></div>
+      <pre id="outLines" class="out"></pre>
+    </div>
+    <div class="out-block">
+      <div class="out-head"><span class="label">Gabungan (spasi)</span><button class="btn small" data-copy="outJoined">Salin</button></div>
+      <pre id="outJoined" class="out wrap"></pre>
+    </div>
+  </section>
+
+  <footer class="foot">Kamus: kata umum bahasa Inggris yang tercatat sebagai noun / verb bentuk dasar di WordNet. Bentuk V2/V3 (went, broken, …) tidak dipakai.</footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
