@@ -11,8 +11,8 @@
   <header class="top">
     <div class="brand">
       <h1>Tebak Kata</h1>
-      <p class="sub only-vocab">Mode Vocab: huruf diacak otomatis, kamu pilih kata dari daftar BIP-39 untuk tiap huruf.</p>
-      <p class="sub only-speak">Mode Speaking: 24 kata BIP-39 langsung muncul otomatis. Ucapkan satu per satu, klik kata untuk dengar pelafalannya.</p>
+      <p class="sub only-vocab">Mode Vocab: huruf berasal dari frasa BIP-39 acak yang disembunyikan. Tebak kata untuk tiap huruf, lalu cek jawabannya.</p>
+      <p class="sub only-speak">Mode Speaking: kata BIP-39 langsung muncul otomatis lewat proses entropy → SHA-256 → checksum. Ucapkan satu per satu, klik kata untuk dengar pelafalannya.</p>
     </div>
   </header>
 
@@ -26,12 +26,16 @@
       Jumlah kata
       <select id="countSel">
         <option value="12">12</option>
+        <option value="15">15</option>
         <option value="18">18</option>
+        <option value="21">21</option>
         <option value="24" selected>24</option>
       </select>
     </label>
     <button id="btnNewLetters" class="btn primary only-vocab">Acak huruf baru</button>
-    <button id="btnFillAll" class="btn only-vocab">Isi kosong secara acak</button>
+    <button id="btnCheck" class="btn only-vocab">Cek jawaban</button>
+    <button id="btnReveal" class="btn only-vocab">Tampilkan jawaban</button>
+    <button id="btnFillAll" class="btn ghost only-vocab">Isi kosong secara acak</button>
     <button id="btnClear" class="btn ghost only-vocab">Hapus pilihan</button>
     <button id="btnGenerate" class="btn primary only-speak">Generate baru</button>
     <button id="btnSpeakAll" class="btn only-speak">Dengarkan semua</button>
@@ -59,7 +63,6 @@
         </div>
         <div class="dict-actions">
           <button id="btnRandomWord" class="btn small">Kata acak</button>
-          <button id="btnRerollLetter" class="btn small ghost" title="Ganti huruf di slot ini">Ganti huruf</button>
         </div>
       </div>
       <div class="dict-tools">
@@ -73,6 +76,25 @@
       <div id="wordList" class="word-list"></div>
     </section>
   </main>
+
+  <section class="sim-wrap" id="sim">
+    <details open>
+      <summary><span class="label">Simulasi matematis BIP-39</span> <span class="muted">dari entropy sampai kata</span></summary>
+      <div class="ent-tools only-speak">
+        <input id="entInput" type="text" placeholder="Coba entropy sendiri: 128–256 bit biner (0/1) atau hex" autocomplete="off" spellcheck="false">
+        <button id="btnUseEntropy" class="btn small">Hitung</button>
+        <button id="btnExample" class="btn small ghost" title="Indeks 1 sampai 11 (ability … accident) + 7 bit nol">Contoh materi</button>
+      </div>
+      <div id="simBody"></div>
+    </details>
+  </section>
+
+  <section class="sim-wrap only-vocab">
+    <details open>
+      <summary><span class="label">Cek checksum kata pilihanmu</span> <span class="muted">kata → indeks → bit</span></summary>
+      <div id="checkBody"></div>
+    </details>
+  </section>
 
   <section class="output">
     <div class="out-block">
@@ -89,9 +111,10 @@
     </div>
   </section>
 
-  <footer class="foot">Kamus: 2048 kata daftar BIP-39 bahasa Inggris. Ini latihan kosakata, jangan pakai hasilnya sebagai seed phrase dompet kripto.</footer>
+  <footer class="foot">Kamus: 2048 kata daftar BIP-39 bahasa Inggris. Ini alat belajar: frasa yang tampil di layar dan tersimpan di browser tidak aman, jangan pernah dipakai untuk dompet kripto sungguhan.</footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="bip39.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,63 +1,54 @@
 (() => {
   'use strict';
 
-  const STORE_KEY = 'tebak-kata-v3';
+  const STORE_KEY = 'tebak-kata-v4';
+  const VALID_COUNTS = [12, 15, 18, 21, 24];
 
   const $ = (id) => document.getElementById(id);
   const el = {
     countSel: $('countSel'), sequence: $('sequence'), progress: $('progress'), slots: $('slots'),
     dictTitle: $('dictTitle'), dictMeta: $('dictMeta'), wordList: $('wordList'), search: $('search'),
     outLetters: $('outLetters'), outLines: $('outLines'), outJoined: $('outJoined'), toast: $('toast'),
+    sim: $('simBody'), check: $('checkBody'),
   };
 
-  let DICT = {};        // { a: [[word, rank], ...] }  — 2048 kata BIP-39
-  let LETTERS = [], WEIGHTS = [];
+  let WORDLIST = [];          // 2048 kata, urutan resmi BIP-39 (posisi = indeks)
+  let INDEX = new Map();      // kata -> indeks
+  let RANK = new Map();       // kata -> peringkat kata umum (untuk urutan "Paling umum")
+  let DICT = {};              // huruf -> [kata, ...]
 
-  const blankGame = () => ({ count: 24, letters: [], words: [], active: 0 });
+  const blankGame = () => ({ count: 24, entHex: '', answer: [], letters: [], words: [], active: 0, checked: false, revealed: false });
   let state = { mode: 'vocab', sort: 'az', vocab: blankGame(), speak: blankGame() };
   const game = () => state[state.mode];
 
   // ---------- util ----------
-  const rand = (n) => {
+  const pad = (n) => String(n + 1).padStart(2, '0');
+  const hexToBytes = (hex) => Uint8Array.from(hex.match(/.{2}/g) || [], (h) => parseInt(h, 16));
+  const pick = (arr) => {
     const a = new Uint32Array(1);
     crypto.getRandomValues(a);
-    return a[0] % n;
+    return arr[a[0] % arr.length];
   };
-  const randFloat = () => rand(1e9) / 1e9;
-  const pick = (arr) => arr[rand(arr.length)];
-  const pickWeighted = (items, weights) => {
-    let r = randFloat() * weights.reduce((a, b) => a + b, 0);
-    for (let i = 0; i < items.length; i++) { r -= weights[i]; if (r < 0) return items[i]; }
-    return items[items.length - 1];
-  };
-  const pad = (n) => String(n + 1).padStart(2, '0');
-
-  const pickLetter = () => pickWeighted(LETTERS, WEIGHTS);
-  const wordsFor = (letter) => DICT[letter] || [];
-
-  // kata acak untuk huruf tertentu, sebisa mungkin belum dipakai di slot lain
-  function randomWordFor(letter, used) {
-    const fresh = wordsFor(letter).filter((w) => !used.has(w[0]));
-    return pick(fresh.length ? fresh : wordsFor(letter))[0];
-  }
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (_) {}
-  }
-  function validGame(g) {
-    return g && Array.isArray(g.letters) && g.letters.length && g.letters.every((l) => DICT[l]);
   }
   function load() {
     try {
       const s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
       if (!s) return;
       state.mode = s.mode === 'speak' ? 'speak' : 'vocab';
-      state.sort = s.sort || 'az';
+      state.sort = s.sort === 'common' ? 'common' : 'az';
       for (const m of ['vocab', 'speak']) {
-        if (validGame(s[m])) {
-          state[m] = { ...blankGame(), ...s[m] };
-          state[m].words = state[m].letters.map((_, i) => s[m].words?.[i] || '');
-        }
+        const g = s[m];
+        if (!g || !/^[0-9a-f]+$/.test(g.entHex || '')) continue;
+        const sim = BIP39.fromEntropy(hexToBytes(g.entHex), WORDLIST);
+        const words = sim.words;
+        state[m] = {
+          ...blankGame(), ...g, count: words.length, answer: words, letters: words.map((w) => w[0]),
+          words: m === 'speak' ? words : words.map((_, i) => (INDEX.has(g.words?.[i]) ? g.words[i] : '')),
+        };
       }
     } catch (_) {}
   }
@@ -67,23 +58,26 @@
     el.toast.textContent = msg;
     el.toast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.toast.classList.remove('show'), 1400);
+    toastTimer = setTimeout(() => el.toast.classList.remove('show'), 1800);
   }
+
+  // ---------- pembentukan kata lewat BIP-39 ----------
+  // Semua huruf & kata berasal dari entropy acak -> SHA-256 -> checksum -> 11-bit -> indeks -> kata.
+  function loadEntropy(mode, entropy) {
+    const sim = BIP39.fromEntropy(entropy, WORDLIST);
+    const g = state[mode];
+    g.count = sim.words.length;
+    g.entHex = sim.entHex;
+    g.answer = sim.words;
+    g.letters = sim.words.map((w) => w[0]);
+    g.words = mode === 'speak' ? [...sim.words] : Array(g.count).fill('');
+    g.active = mode === 'speak' ? -1 : 0;
+    g.checked = false;
+    g.revealed = false;
+  }
+  const newGame = (mode, count) => loadEntropy(mode, BIP39.randomEntropy(count));
 
   // ---------- mode 1: vocab ----------
-  function newVocab(count) {
-    const g = state.vocab;
-    g.count = count;
-    g.letters = Array.from({ length: count }, pickLetter);
-    g.words = Array(count).fill('');
-    g.active = 0;
-  }
-
-  function randomVocabWord(i) {
-    const g = state.vocab;
-    return randomWordFor(g.letters[i], new Set(g.words.filter(Boolean)));
-  }
-
   function nextEmpty(g, from) {
     for (let k = 1; k <= g.count; k++) {
       const i = (from + k) % g.count;
@@ -100,21 +94,15 @@
     render();
   }
 
-  // ---------- mode 2: speaking ----------
-  function newSpeak(count) {
-    const g = state.speak;
-    g.count = count;
-    g.letters = Array.from({ length: count }, pickLetter);
-    const used = new Set();
-    g.words = g.letters.map((l) => {
-      const w = randomWordFor(l, used);
-      used.add(w);
-      return w;
-    });
-    g.active = -1;
+  function randomVocabWord(i) {
+    const g = state.vocab;
+    const used = new Set(g.words.filter(Boolean));
+    const list = DICT[g.letters[i]];
+    const fresh = list.filter((w) => !used.has(w));
+    return pick(fresh.length ? fresh : list);
   }
 
-  // text-to-speech bawaan browser untuk latihan pelafalan
+  // ---------- mode 2: speaking (suara) ----------
   function speak(text, onend) {
     if (!('speechSynthesis' in window)) { toast('Browser tidak mendukung suara'); return; }
     const u = new SpeechSynthesisUtterance(text);
@@ -125,22 +113,21 @@
   }
 
   let speakingAll = false;
+  function stopSpeaking() {
+    if ('speechSynthesis' in window) speechSynthesis.cancel();
+    speakingAll = false;
+    $('btnSpeakAll').textContent = 'Dengarkan semua';
+  }
   function speakAll() {
-    if (speakingAll) {
-      speechSynthesis.cancel();
-      speakingAll = false;
-      $('btnSpeakAll').textContent = 'Dengarkan semua';
-      return;
-    }
+    if (speakingAll) { stopSpeaking(); return; }
     const g = state.speak;
-    speechSynthesis.cancel();
+    stopSpeaking();
     speakingAll = true;
     $('btnSpeakAll').textContent = 'Stop';
     let i = 0;
     const step = () => {
       if (!speakingAll || i >= g.count) {
-        speakingAll = false;
-        $('btnSpeakAll').textContent = 'Dengarkan semua';
+        stopSpeaking();
         g.active = -1;
         render();
         return;
@@ -152,7 +139,7 @@
     step();
   }
 
-  // ---------- render ----------
+  // ---------- render: huruf, slot, kamus, hasil ----------
   function renderSequence() {
     const g = game();
     const frag = document.createDocumentFragment();
@@ -180,10 +167,15 @@
     const frag = document.createDocumentFragment();
     g.letters.forEach((l, i) => {
       const b = document.createElement('button');
-      b.className = 'slot' + (i === g.active ? ' active' : '');
       const w = g.words[i];
-      b.innerHTML = `<span class="num">${pad(i)}</span><span class="let">${l}</span><span class="word${w ? '' : ' empty'}"></span>`;
-      b.querySelector('.word').textContent = w || 'pilih kata…';
+      let cls = 'slot' + (i === g.active ? ' active' : '');
+      if (state.mode === 'vocab' && g.checked && w) cls += w === g.answer[i] ? ' ok' : ' bad';
+      b.className = cls;
+      const idx = w ? INDEX.get(w) : null;
+      b.innerHTML = `<span class="num">${pad(i)}</span><span class="let">${l}</span>` +
+        `<span class="word${w ? '' : ' empty'}">${esc(w || 'pilih kata…')}</span>` +
+        (idx != null ? `<span class="idx">#${idx}</span>` : '') +
+        (state.mode === 'vocab' && g.revealed && w !== g.answer[i] ? `<span class="ans">${esc(g.answer[i])}</span>` : '');
       b.onclick = () => onSlot(i);
       frag.appendChild(b);
     });
@@ -198,19 +190,19 @@
     el.dictTitle.textContent = `Huruf ${letter.toUpperCase()} · slot ${pad(i)}`;
 
     const q = el.search.value.trim().toLowerCase();
-    const all = wordsFor(letter);
-    let list = q ? all.filter((w) => w[0].includes(q)) : all;
-    const byOrder = state.sort === 'common' ? (a, b) => a[1] - b[1] : (a, b) => a[0].localeCompare(b[0]);
-    list = [...list].sort((a, b) => (q ? b[0].startsWith(q) - a[0].startsWith(q) : 0) || byOrder(a, b));
+    const all = DICT[letter];
+    let list = q ? all.filter((w) => w.includes(q)) : all;
+    const byOrder = state.sort === 'common' ? (a, b) => RANK.get(a) - RANK.get(b) : (a, b) => INDEX.get(a) - INDEX.get(b);
+    list = [...list].sort((a, b) => (q ? b.startsWith(q) - a.startsWith(q) : 0) || byOrder(a, b));
     el.dictMeta.textContent = q ? `${list.length} dari ${all.length} kata cocok` : `${all.length} kata`;
 
     const used = new Set(g.words.filter(Boolean));
     const current = g.words[i];
     const frag = document.createDocumentFragment();
-    for (const [word] of list) {
+    for (const word of list) {
       const b = document.createElement('button');
       b.className = 'w' + (word === current ? ' picked' : used.has(word) ? ' used' : '');
-      b.textContent = word;
+      b.innerHTML = `<span>${esc(word)}</span><small>#${INDEX.get(word)}</small>`;
       b.onclick = () => setWord(i, word);
       frag.appendChild(b);
     }
@@ -232,14 +224,117 @@
     el.outJoined.textContent = shown.join(' ');
   }
 
+  // ---------- render: simulasi matematis ----------
+  function groupedBits(bits, csFrom) {
+    // tampilkan per kelompok 11 bit; bit checksum (posisi >= csFrom) diberi warna
+    const parts = [];
+    for (let i = 0; i < bits.length; i += 11) {
+      const chunk = bits.slice(i, i + 11);
+      let html = '';
+      for (let j = 0; j < chunk.length; j++) {
+        const pos = i + j;
+        html += csFrom != null && pos >= csFrom ? `<b class="cs">${chunk[j]}</b>` : chunk[j];
+      }
+      parts.push(`<span class="g11">${html}</span>`);
+    }
+    return parts.join(' ');
+  }
+
+  function stepsHTML(sim) {
+    const { ENT, CS, entBits, entHex, hashHex, checksum, all, groups } = sim;
+    const hexUsed = Math.ceil(CS / 4);
+    const hexExplain = hashHex.slice(0, hexUsed).split('').map((c) =>
+      `<code>${c}</code> → desimal ${parseInt(c, 16)} → biner <code>${parseInt(c, 16).toString(2).padStart(4, '0')}</code>`).join('<br>');
+    const rows = groups.map((g, i) => {
+      const csStart = ENT - i * 11; // posisi checksum relatif terhadap kelompok ini
+      let bitsHTML = '';
+      for (let j = 0; j < 11; j++) bitsHTML += j >= csStart ? `<b class="cs">${g.bits[j]}</b>` : g.bits[j];
+      return `<tr><td>${i + 1}</td><td class="mono">${bitsHTML}</td><td class="num">${g.index}</td><td class="word">${esc(g.word)}</td></tr>`;
+    }).join('');
+
+    return `
+      <ol class="steps">
+        <li>
+          <h3>Pembuatan entropy</h3>
+          <p>Komputer membuat <b>${ENT} bit</b> data acak (deretan 0 dan 1).</p>
+          <pre class="bits brk">${entBits.match(/.{1,64}/g).join('\n')}</pre>
+          <p class="muted">Dalam hex: <code class="break">${entHex}</code></p>
+        </li>
+        <li>
+          <h3>Hashing SHA-256</h3>
+          <p>Entropy ${ENT} bit itu dimasukkan ke fungsi SHA-256. Hasilnya 64 karakter hex:</p>
+          <pre class="bits brk"><b class="cs">${hashHex.slice(0, hexUsed)}</b>${hashHex.slice(hexUsed)}</pre>
+        </li>
+        <li>
+          <h3>Pengambilan checksum</h3>
+          <p>Panjang checksum = ${ENT} ÷ 32 = <b>${CS} bit</b>, diambil dari bit paling depan hasil hash.</p>
+          <p>${hexExplain}</p>
+          <p>Checksum = <code class="cs-code">${checksum}</code>${CS % 4 ? ` (hanya ${CS} bit pertama yang dipakai)` : ''}</p>
+        </li>
+        <li>
+          <h3>Penggabungan data</h3>
+          <p>${CS} bit checksum ditempel di belakang entropy: ${ENT} + ${CS} = <b>${ENT + CS} bit</b>. (Bit berwarna = checksum.)</p>
+          <pre class="bits wrap">${groupedBits(all, ENT)}</pre>
+        </li>
+        <li>
+          <h3>Pemotongan menjadi 11-bit &amp; pemetaan ke kamus BIP-39</h3>
+          <p>${ENT + CS} bit ÷ 11 = <b>${groups.length} kelompok</b>. Tiap kelompok diubah ke desimal (0–2047), lalu dicocokkan ke kamus BIP-39 (indeks 0 = <i>abandon</i>).</p>
+          <div class="table-wrap"><table class="sim-table">
+            <thead><tr><th>Kelompok</th><th>11 bit</th><th>Indeks</th><th>Kata</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table></div>
+        </li>
+        <li>
+          <h3>Hasil frasa</h3>
+          <pre class="bits wrap phrase">${esc(sim.words.join(' '))}</pre>
+          <p class="muted">Kata terakhir <b>${esc(sim.words[sim.words.length - 1])}</b> mengandung ${CS} bit checksum, jadi frasa ini valid secara matematis. Kalau satu kata saja diganti, checksum hampir pasti tidak cocok lagi.</p>
+        </li>
+      </ol>`;
+  }
+
+  function renderSim() {
+    const g = game();
+    if (state.mode === 'speak' || g.revealed) {
+      el.sim.innerHTML = stepsHTML(BIP39.fromEntropy(hexToBytes(g.entHex), WORDLIST));
+    } else {
+      el.sim.innerHTML = `<p class="muted">Huruf di atas berasal dari frasa BIP-39 yang <b>valid</b> (dibuat lewat entropy → SHA-256 → checksum → 11-bit).
+        Kata aslinya disembunyikan. Tebak semua katanya, tekan <b>Cek jawaban</b>, lalu <b>Tampilkan jawaban</b> untuk melihat simulasi lengkapnya.</p>`;
+    }
+  }
+
+  function renderCheck() {
+    if (state.mode !== 'vocab') { el.check.innerHTML = ''; return; }
+    const g = state.vocab;
+    const filled = g.words.filter(Boolean).length;
+    if (filled < g.count) {
+      el.check.innerHTML = `<p class="muted">Isi semua ${g.count} kata dulu (${filled}/${g.count}). Setelah lengkap, di sini muncul perhitungan kebalikannya: kata → indeks → bit → cek checksum.</p>`;
+      return;
+    }
+    const r = BIP39.check(g.words, INDEX);
+    const rows = g.words.map((w, i) => `<tr><td>${i + 1}</td><td class="word">${esc(w)}</td><td class="num">${r.idx[i]}</td><td class="mono">${groupedBits(r.idx[i].toString(2).padStart(11, '0'), i === g.count - 1 ? 11 - r.CS : null).replace(/<\/?span[^>]*>/g, '')}</td></tr>`).join('');
+    const hexUsed = Math.ceil(r.CS / 4);
+    el.check.innerHTML = `
+      <div class="verdict ${r.ok ? 'ok' : 'bad'}">${r.ok ? '✓ Checksum cocok, frasa pilihanmu valid secara matematis' : '✗ Checksum tidak cocok, frasa pilihanmu akan ditolak wallet'}</div>
+      <div class="table-wrap"><table class="sim-table">
+        <thead><tr><th>No</th><th>Kata</th><th>Indeks</th><th>11 bit</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <p>${r.ENT + r.CS} bit dipisah menjadi <b>${r.ENT} bit entropy</b> + <b>${r.CS} bit checksum</b> (<code class="cs-code">${r.given}</code>).</p>
+      <p>SHA-256(entropy) = <code class="break"><b class="cs">${r.hashHex.slice(0, hexUsed)}</b>${r.hashHex.slice(hexUsed)}</code></p>
+      <p>Checksum seharusnya <code class="cs-code">${r.expected}</code>, dari kata pilihanmu <code class="cs-code">${r.given}</code> → <b>${r.ok ? 'cocok' : 'tidak cocok'}</b>.</p>`;
+  }
+
   function render() {
     document.body.className = 'mode-' + state.mode;
     document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.mode === state.mode));
     el.countSel.value = String(game().count);
+    $('btnReveal').textContent = state.vocab.revealed ? 'Sembunyikan jawaban' : 'Tampilkan jawaban';
     renderSequence();
     renderSlots();
     renderDict();
     renderOutput();
+    renderSim();
+    renderCheck();
     save();
   }
 
@@ -247,9 +342,7 @@
     const g = game();
     g.active = i;
     if (state.mode === 'speak') {
-      speechSynthesis?.cancel();
-      speakingAll = false;
-      $('btnSpeakAll').textContent = 'Dengarkan semua';
+      stopSpeaking();
       speak(g.words[i]);
       render();
       return;
@@ -262,23 +355,24 @@
   }
 
   function setMode(mode) {
-    if ('speechSynthesis' in window) speechSynthesis.cancel();
-    speakingAll = false;
-    $('btnSpeakAll').textContent = 'Dengarkan semua';
+    stopSpeaking();
     state.mode = mode;
-    if (!game().letters.length) (mode === 'vocab' ? newVocab : newSpeak)(24);
     if (mode === 'vocab' && game().active < 0) game().active = 0;
     render();
+  }
+
+  // contoh dari materi: indeks 1..11 + 7 bit awal indeks 12 = 128 bit entropy
+  function exampleEntropyBits() {
+    let bits = '';
+    for (let i = 1; i <= 12; i++) bits += i.toString(2).padStart(11, '0');
+    return bits.slice(0, 128);
   }
 
   // ---------- events ----------
   function bind() {
     document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => setMode(t.dataset.mode); });
-    el.countSel.onchange = () => {
-      (state.mode === 'vocab' ? newVocab : newSpeak)(+el.countSel.value);
-      render();
-    };
-    $('btnNewLetters').onclick = () => { newVocab(+el.countSel.value); render(); toast('Huruf baru diacak'); };
+    el.countSel.onchange = () => { stopSpeaking(); newGame(state.mode, +el.countSel.value); render(); };
+    $('btnNewLetters').onclick = () => { newGame('vocab', +el.countSel.value); render(); toast('Frasa baru dibuat, huruf diacak'); };
     $('btnFillAll').onclick = () => {
       const g = state.vocab;
       g.words.forEach((w, i) => { if (!w) g.words[i] = randomVocabWord(i); });
@@ -288,27 +382,43 @@
       const g = state.vocab;
       g.words = Array(g.count).fill('');
       g.active = 0;
+      g.checked = false;
       render();
     };
-    $('btnGenerate').onclick = () => {
-      if ('speechSynthesis' in window) speechSynthesis.cancel();
-      speakingAll = false;
-      $('btnSpeakAll').textContent = 'Dengarkan semua';
-      newSpeak(+el.countSel.value);
+    $('btnCheck').onclick = () => {
+      const g = state.vocab;
+      g.checked = true;
+      const right = g.words.filter((w, i) => w && w === g.answer[i]).length;
       render();
-      toast('Kata baru dibuat');
+      toast(`${right} dari ${g.count} kata sama dengan jawaban`);
     };
+    $('btnReveal').onclick = () => {
+      const g = state.vocab;
+      g.revealed = !g.revealed;
+      if (g.revealed) g.checked = true;
+      render();
+      if (g.revealed) $('sim').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    $('btnGenerate').onclick = () => { stopSpeaking(); newGame('speak', +el.countSel.value); render(); toast('Frasa baru dibuat'); };
     $('btnSpeakAll').onclick = speakAll;
     $('btnRandomWord').onclick = () => setWord(state.vocab.active, randomVocabWord(state.vocab.active), false);
-    $('btnRerollLetter').onclick = () => {
-      const g = state.vocab;
-      const i = g.active;
-      let l;
-      do { l = pickLetter(); } while (l === g.letters[i] && LETTERS.length > 1);
-      g.letters[i] = l;
-      g.words[i] = '';
-      render();
+
+    const entInput = $('entInput');
+    $('btnUseEntropy').onclick = () => {
+      try {
+        stopSpeaking();
+        loadEntropy('speak', BIP39.parseEntropy(entInput.value));
+        render();
+        toast('Entropy dipakai');
+      } catch (err) {
+        toast(err.message);
+      }
     };
+    $('btnExample').onclick = () => {
+      entInput.value = exampleEntropyBits();
+      $('btnUseEntropy').click();
+    };
+
     el.search.oninput = renderDict;
     el.search.onkeydown = (e) => {
       if (e.key === 'Enter') el.wordList.querySelector('.w')?.click();
@@ -334,15 +444,18 @@
 
   // ---------- init ----------
   async function init() {
-    const res = await fetch('words.json');
-    DICT = await res.json();
-    // bobot huruf = akar jumlah kata, supaya huruf langka (q, y, z) tidak terlalu sering muncul
-    LETTERS = Object.keys(DICT);
-    WEIGHTS = LETTERS.map((l) => Math.sqrt(DICT[l].length));
+    const data = await (await fetch('words.json')).json();
+    WORDLIST = data.map((d) => d[0]);
+    if (WORDLIST.length !== 2048) throw new Error('words.json harus 2048 kata');
+    data.forEach(([w, r], i) => {
+      INDEX.set(w, i);
+      RANK.set(w, r);
+      (DICT[w[0]] ||= []).push(w);
+    });
 
     load();
-    if (!state.vocab.letters.length) newVocab(24);
-    if (!state.speak.letters.length) newSpeak(24);
+    if (!state.vocab.entHex) newGame('vocab', 24);
+    if (!state.speak.entHex) newGame('speak', 24);
     $('sortSel').value = state.sort;
     bind();
     render();
