@@ -58,34 +58,7 @@
   const entBitsFor = (wordCount) => (wordCount * 11 * 32) / 33;
 
   // Pengacakan TIDAK dilakukan di sini (bukan crypto.getRandomValues browser).
-  // Lemparan koin/dadu otomatis dibuat server Python (api/entropy.py); file ini hanya menghitung.
-  const coinsToBits = (coins) => coins.join('');
-
-  // Lempar dadu: 1→00, 2→01, 3→10, 4→11, 5→0, 6→1.
-  // Tanpa bias: kalau keluar 1–4, keempat pola 2-bit sama peluangnya; kalau keluar 5–6, bit 0/1 sama peluangnya.
-  const DICE_BITS = { 1: '00', 2: '01', 3: '10', 4: '11', 5: '0', 6: '1' };
-  const diceToBits = (faces) => faces.map((f) => DICE_BITS[f]).join('');
-
-  // statistik sederhana untuk mendeteksi pola "buatan manusia"
-  function bitStats(bits) {
-    const ones = (bits.match(/1/g) || []).length;
-    let longest = 0, run = 0;
-    for (let i = 0; i < bits.length; i++) {
-      run = i && bits[i] === bits[i - 1] ? run + 1 : 1;
-      if (run > longest) longest = run;
-    }
-    let alternations = 0;
-    for (let i = 1; i < bits.length; i++) if (bits[i] !== bits[i - 1]) alternations++;
-    const n = bits.length;
-    const warnings = [];
-    if (Math.abs(ones - n / 2) > 3 * Math.sqrt(n) / 2) warnings.push(`jumlah 1 dan 0 terlalu timpang (${ones} vs ${n - ones})`);
-    if (longest > Math.log2(n) + 6) warnings.push(`ada deret angka sama sepanjang ${longest}`);
-    if (longest < Math.log2(n) - 3) warnings.push(`deret terpanjang cuma ${longest}; hasil acak asli biasanya punya deret lebih panjang (sekitar ${Math.round(Math.log2(n))})`);
-    const altRatio = alternations / (n - 1);
-    if (altRatio > 0.65) warnings.push('angka terlalu sering berganti (mirip pola 1010…)');
-    if (altRatio < 0.35) warnings.push('angka terlalu jarang berganti');
-    return { n, ones, zeros: n - ones, longest, alternations, warnings };
-  }
+  // Angka hex acak untuk entropy dibuat server Python (api/entropy.py); file ini hanya menghitung.
 
   // Ubah teks biner (0/1) atau hex menjadi byte entropy. Panjang harus 128/160/192/224/256 bit.
   function parseEntropy(text) {
@@ -136,6 +109,5 @@
 
   global.BIP39 = {
     sha256, bytesToBin, bytesToHex, binToBytes, entBitsFor, parseEntropy, fromEntropy, check,
-    coinsToBits, diceToBits, DICE_BITS, bitStats,
   };
 })(window);

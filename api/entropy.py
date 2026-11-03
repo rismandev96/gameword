@@ -1,12 +1,8 @@
 """Vercel Python Function:
-    GET /api/entropy?kind=coin|dice&bits=128   -> lemparan koin / dadu untuk entropy
-    GET /api/entropy?kind=u32&count=24         -> bilangan acak 32-bit (untuk tombol "Kata acak")
+    GET /api/entropy?kind=hex&bits=256   -> angka hex acak untuk entropy (256 bit = 64 karakter hex)
+    GET /api/entropy?kind=u32&count=24   -> bilangan acak 32-bit (untuk tombol "Kata acak")
 
-Mensimulasikan lempar koin / dadu memakai modul `secrets` Python.
-(Bukan modul `random`: `random` memakai Mersenne Twister yang bisa ditebak.)
-
-Koin : Angka = 1, Gambar = 0, satu lemparan = 1 bit -> tepat `bits` lemparan.
-Dadu : 1->00, 2->01, 3->10, 4->11, 5->0, 6->1 (tanpa bias), dilempar sampai >= `bits` bit.
+Memakai modul `secrets` Python, bukan modul `random` (Mersenne Twister, hasilnya bisa ditebak).
 """
 import json
 import secrets
@@ -14,41 +10,29 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 
 VALID_BITS = (128, 160, 192, 224, 256)
-DICE_BITS = {1: 2, 2: 2, 3: 2, 4: 2, 5: 1, 6: 1}
 
 
-def flip_coins(bits):
-    return [secrets.randbelow(2) for _ in range(bits)]
-
-
-def roll_dice(bits):
-    faces, total = [], 0
-    while total < bits:
-        face = secrets.randbelow(6) + 1
-        faces.append(face)
-        total += DICE_BITS[face]
-    return faces
+def _int(query, key, default):
+    try:
+        return int((query.get(key) or [default])[0])
+    except ValueError:
+        return None
 
 
 def make_entropy(query):
     """query: dict hasil parse_qs. Mengembalikan (status, dict)."""
-    kind = (query.get('kind') or ['coin'])[0]
+    kind = (query.get('kind') or ['hex'])[0]
+    if kind == 'hex':
+        bits = _int(query, 'bits', '256')
+        if bits not in VALID_BITS:
+            return 400, {'error': 'bits harus 128/160/192/224/256'}
+        return 200, {'kind': 'hex', 'bits': bits, 'hex': secrets.token_hex(bits // 8), 'generator': 'python secrets'}
     if kind == 'u32':
-        try:
-            count = int((query.get('count') or ['1'])[0])
-        except ValueError:
-            count = 0
-        if not 1 <= count <= 64:
+        count = _int(query, 'count', '1')
+        if count is None or not 1 <= count <= 64:
             return 400, {'error': 'count harus 1-64'}
         return 200, {'kind': 'u32', 'values': [secrets.randbits(32) for _ in range(count)], 'generator': 'python secrets'}
-    try:
-        bits = int((query.get('bits') or ['128'])[0])
-    except ValueError:
-        bits = 0
-    if kind not in ('coin', 'dice') or bits not in VALID_BITS:
-        return 400, {'error': 'kind harus coin/dice, bits harus 128/160/192/224/256'}
-    values = flip_coins(bits) if kind == 'coin' else roll_dice(bits)
-    return 200, {'kind': kind, 'bits': bits, 'values': values, 'generator': 'python secrets'}
+    return 400, {'error': 'kind harus hex atau u32'}
 
 
 class handler(BaseHTTPRequestHandler):

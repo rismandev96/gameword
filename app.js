@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const STORE_KEY = 'tebak-kata-v5';
+  const STORE_KEY = 'tebak-kata-v6';
   const VALID_COUNTS = [12, 15, 18, 21, 24];
 
   const $ = (id) => document.getElementById(id);
@@ -17,10 +17,10 @@
   let RANK = new Map();       // kata -> peringkat kata umum (untuk urutan "Paling umum")
   let DICT = {};              // huruf -> [kata, ...]
 
-  // src = asal entropy: { type: 'coin' | 'dice' | 'input', values: [...], manual: bool }
+  // src = asal entropy: { type: 'hex' | 'input', python: bool }
   const blankGame = () => ({ count: 24, entHex: '', src: null, answer: [], letters: [], words: [], active: 0, checked: false, revealed: false });
-  // source = pilihan sumber entropy di mode speaking: coin | dice | mcoin | mdice | input
-  let state = { mode: 'vocab', sort: 'az', source: 'coin', manual: [], vocab: blankGame(), speak: blankGame() };
+  // source = pilihan sumber entropy di mode speaking: hex (acak Python) | input (ketik)
+  let state = { mode: 'vocab', sort: 'az', source: 'hex', vocab: blankGame(), speak: blankGame() };
   const game = () => state[state.mode];
 
   // ---------- util ----------
@@ -37,15 +37,13 @@
       if (!s) return;
       state.mode = s.mode === 'speak' ? 'speak' : 'vocab';
       state.sort = s.sort === 'common' ? 'common' : 'az';
-      if (['coin', 'dice', 'mcoin', 'mdice', 'input'].includes(s.source)) state.source = s.source;
-      if (Array.isArray(s.manual)) state.manual = s.manual.filter((v) => Number.isInteger(v) && v >= 0 && v <= 6);
+      if (['hex', 'input'].includes(s.source)) state.source = s.source;
       for (const m of ['vocab', 'speak']) {
         const g = s[m];
         if (!g || !/^[0-9a-f]+$/.test(g.entHex || '')) continue;
         const sim = BIP39.fromEntropy(hexToBytes(g.entHex), WORDLIST);
         const words = sim.words;
-        const src = g.src && ['coin', 'dice', 'input'].includes(g.src.type) && Array.isArray(g.src.values) &&
-          g.src.values.every((v) => Number.isInteger(v) && v >= 0 && v <= 6) ? g.src : null;
+        const src = g.src && ['hex', 'input'].includes(g.src.type) ? { type: g.src.type, python: !!g.src.python } : null;
         state[m] = {
           ...blankGame(), ...g, src, count: words.length, answer: words, letters: words.map((w) => w[0]),
           words: m === 'speak' ? words : words.map((_, i) => (INDEX.has(g.words?.[i]) ? g.words[i] : '')),
@@ -67,7 +65,7 @@
   function loadEntropy(mode, entropy, src) {
     const sim = BIP39.fromEntropy(entropy, WORDLIST);
     const g = state[mode];
-    g.src = src || { type: 'input', values: [] };
+    g.src = src || { type: 'input' };
     g.count = sim.words.length;
     g.entHex = sim.entHex;
     g.answer = sim.words;
@@ -77,29 +75,24 @@
     g.checked = false;
     g.revealed = false;
   }
-  // Entropy dibuat seperti cara fisik: lempar koin (1 lemparan = 1 bit) atau lempar dadu.
-  // Lemparan acaknya dibuat oleh server Python (api/entropy.py, modul `secrets`), bukan oleh browser.
-  async function fetchTosses(kind, bits) {
-    const res = await fetch(`api/entropy?kind=${kind}&bits=${bits}`, { cache: 'no-store' });
+  // Entropy = angka hex acak dari server Python (api/entropy.py, modul `secrets`), bukan dari browser.
+  // 24 kata = 256 bit = 64 karakter hex; 12 kata = 128 bit = 32 karakter hex.
+  async function fetchHex(bits) {
+    const res = await fetch(`api/entropy?kind=hex&bits=${bits}`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`server ${res.status}`);
-    const data = await res.json();
-    const v = data.values;
-    const okVal = (x) => Number.isInteger(x) && (kind === 'coin' ? x === 0 || x === 1 : x >= 1 && x <= 6);
-    const got = Array.isArray(v) && v.every(okVal) ? (kind === 'coin' ? v.length : BIP39.diceToBits(v).length) : 0;
-    if (got < bits) throw new Error('jawaban server tidak valid');
-    return v;
+    const hex = (await res.json()).hex;
+    if (typeof hex !== 'string' || !new RegExp(`^[0-9a-f]{${bits / 4}}$`).test(hex)) throw new Error('jawaban server tidak valid');
+    return hex;
   }
 
   let busy = false;
-  async function newGame(mode, count, kind = 'coin') {
+  async function newGame(mode, count) {
     if (busy) return false;
     busy = true;
     document.body.classList.add('busy');
     try {
-      const ent = BIP39.entBitsFor(count);
-      const values = await fetchTosses(kind, ent);
-      const bits = kind === 'dice' ? BIP39.diceToBits(values) : BIP39.coinsToBits(values);
-      loadEntropy(mode, BIP39.binToBytes(bits.slice(0, ent)), { type: kind, values, python: true });
+      const hex = await fetchHex(BIP39.entBitsFor(count));
+      loadEntropy(mode, hexToBytes(hex), { type: 'hex', python: true });
       return true;
     } catch (err) {
       console.error(err);
@@ -110,7 +103,6 @@
       document.body.classList.remove('busy');
     }
   }
-  const autoKind = () => (state.source === 'dice' || state.source === 'mdice' ? 'dice' : 'coin');
 
   // ---------- mode 1: vocab ----------
   function nextEmpty(g, from) {
@@ -292,35 +284,22 @@
     return parts.join(' ');
   }
 
-  // ---- langkah 1: asal entropy (koin / dadu / ketik) ----
-  const DIE_FACE = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
-  const coinHTML = (v, i) => `<span class="coin c${v}" title="Lemparan ${i + 1}: ${v ? 'Angka' : 'Gambar'}"><i>${v ? 'A' : 'G'}</i><small>${v}</small></span>`;
-  const dieHTML = (f, i) => `<span class="die" title="Lemparan ${i + 1}: ${f}"><i>${DIE_FACE[f]}</i><small>${BIP39.DICE_BITS[f]}</small></span>`;
-  const DICE_LEGEND = `<div class="dice-legend">${[1, 2, 3, 4, 5, 6].map((f) => `<span><i>${DIE_FACE[f]}</i> ${f} → <code>${BIP39.DICE_BITS[f]}</code></span>`).join('')}</div>`;
-
-  function entropySourceHTML(ENT, src) {
-    const how = src?.manual ? 'dilempar sungguhan lalu dicatat' : src?.python ? 'disimulasikan oleh server Python (modul secrets)' : 'disimulasikan';
-    if (src?.type === 'coin' && src.values?.length) {
-      return `<p>Koin ${how} sebanyak <b>${src.values.length} kali</b>. <b>Angka = 1</b>, <b>Gambar = 0</b>. Satu lemparan = 1 bit.</p>
-        <div class="tosses">${src.values.map(coinHTML).join('')}</div>`;
-    }
-    if (src?.type === 'dice' && src.values?.length) {
-      const bits = BIP39.diceToBits(src.values).length;
-      return `<p>Dadu ${how} sebanyak <b>${src.values.length} kali</b>. Tiap mata dadu diubah ke biner:</p>
-        ${DICE_LEGEND}
-        <p class="muted">Aturan ini tanpa bias: kalau keluar 1–4, keempat pola 2-bit sama peluangnya; kalau keluar 5–6, bit 0 dan 1 sama peluangnya.</p>
-        <div class="tosses">${src.values.map(dieHTML).join('')}</div>
-        ${bits > ENT ? `<p class="muted">Total ${bits} bit, diambil ${ENT} bit pertama (sisa ${bits - ENT} bit dari lemparan terakhir dibuang).</p>` : ''}`;
-    }
-    return `<p>Entropy ${ENT} bit dimasukkan langsung (biner/hex).</p>`;
-  }
-
-  function statsHTML(bits) {
-    const st = BIP39.bitStats(bits);
-    const warn = st.warnings.length
-      ? `<div class="warn-box">⚠ Hasil ini terlihat <b>tidak acak</b>: ${st.warnings.join('; ')}. Pola seperti ini biasanya muncul kalau angka dibuat dari kepala/ketikan, dan mudah ditebak bot peretas.</div>`
-      : '';
-    return `<p class="muted">Cek pola: angka 1 = ${st.ones}, angka 0 = ${st.zeros}, deret angka sama terpanjang = ${st.longest}.</p>${warn}`;
+  // ---- langkah 1: angka acak (entropy) ----
+  function entropyStepHTML(sim, src) {
+    const { ENT, entBits, entHex } = sim;
+    const cells = entHex.split('').map((c, i) =>
+      `<span class="hx" title="karakter ${i + 1}"><i>${c}</i><small>${parseInt(c, 16).toString(2).padStart(4, '0')}</small></span>`).join('');
+    const intro = src?.python
+      ? `Server Python (modul <code>secrets</code>) membuat <b>${entHex.length} karakter hex acak</b> = ${entHex.length} × 4 = <b>${ENT} bit</b>.`
+      : `Entropy <b>${ENT} bit</b> (${entHex.length} karakter hex) dimasukkan langsung.`;
+    return `
+          <h3>Angka acak (entropy)</h3>
+          <p>${intro}</p>
+          <pre class="bits brk hexbig">${entHex}</pre>
+          <p>Tiap karakter hex = 4 bit:</p>
+          <div class="hex-grid">${cells}</div>
+          <p>Jadi entropy dalam biner (${ENT} bit):</p>
+          <pre class="bits brk">${entBits.match(/.{1,64}/g).join('\n')}</pre>`;
   }
 
   function stepsHTML(sim, src) {
@@ -338,12 +317,7 @@
     return `
       <ol class="steps">
         <li>
-          <h3>Pembuatan entropy</h3>
-          ${entropySourceHTML(ENT, src)}
-          <p>Hasilnya <b>${ENT} bit</b> entropy:</p>
-          <pre class="bits brk">${entBits.match(/.{1,64}/g).join('\n')}</pre>
-          <p class="muted">Dalam hex: <code class="break">${entHex}</code></p>
-          ${statsHTML(entBits)}
+          ${entropyStepHTML(sim, src)}
         </li>
         <li>
           <h3>Hashing SHA-256</h3>
@@ -382,73 +356,29 @@
     if (state.mode === 'speak' || g.revealed) {
       el.sim.innerHTML = stepsHTML(BIP39.fromEntropy(hexToBytes(g.entHex), WORDLIST), g.src);
     } else {
-      el.sim.innerHTML = `<p class="muted">Huruf di atas berasal dari frasa BIP-39 yang <b>valid</b>: entropy dari simulasi lempar koin acak → SHA-256 → checksum → 11-bit.
+      el.sim.innerHTML = `<p class="muted">Huruf di atas berasal dari frasa BIP-39 yang <b>valid</b>: entropy dari angka hex acak (Python) → SHA-256 → checksum → 11-bit.
         Kata aslinya disembunyikan. Tebak semua katanya, tekan <b>Cek jawaban</b>, lalu <b>Tampilkan jawaban</b> untuk melihat simulasi lengkapnya.</p>`;
     }
   }
 
   // ---- panel sumber entropy (mode speaking) ----
-  const SOURCES = [
-    ['coin', 'Koin (acak Python)'], ['dice', 'Dadu (acak Python)'],
-    ['mcoin', 'Koin asli (catat manual)'], ['mdice', 'Dadu asli (catat manual)'], ['input', 'Ketik entropy'],
-  ];
-
-  function manualBits() {
-    return state.source === 'mdice' ? BIP39.diceToBits(state.manual) : state.manual.join('');
-  }
+  const SOURCES = [['hex', 'Acak (Python)'], ['input', 'Ketik entropy']];
 
   function renderEntTools() {
     const box = $('entTools');
     if (state.mode !== 'speak') { box.innerHTML = ''; return; }
     const ent = BIP39.entBitsFor(+el.countSel.value);
     const chips = SOURCES.map(([k, label]) => `<button class="chip-f${state.source === k ? ' active' : ''}" data-src="${k}">${label}</button>`).join('');
-    let body = '';
-    if (state.source === 'coin' || state.source === 'dice') {
-      const what = state.source === 'coin' ? `koin ${ent} kali` : 'dadu sampai dapat ' + ent + ' bit';
-      body = `<p class="muted">Server Python (<code>secrets</code>) mensimulasikan lempar ${what} secara acak.</p>
-        <button class="btn small primary" data-act="auto">Lempar lagi</button>`;
-    } else if (state.source === 'mcoin' || state.source === 'mdice') {
-      const bits = manualBits().length;
-      const isCoin = state.source === 'mcoin';
-      const btns = isCoin
-        ? `<button class="btn toss" data-act="v" data-v="1">Angka <small>= 1</small></button><button class="btn toss" data-act="v" data-v="0">Gambar <small>= 0</small></button>`
-        : [1, 2, 3, 4, 5, 6].map((f) => `<button class="btn toss die-btn" data-act="v" data-v="${f}">${DIE_FACE[f]}<small>${f}</small></button>`).join('');
-      body = `<p class="muted">${isCoin
-        ? `Lempar koin fisik, lalu klik hasilnya (atau tekan tombol <kbd>1</kbd> / <kbd>0</kbd>). Butuh ${ent} lemparan.`
-        : `Lempar dadu fisik, lalu klik mata dadunya (atau tekan <kbd>1</kbd>–<kbd>6</kbd>). Butuh kira-kira ${Math.ceil(ent / 1.67)} lemparan.`}
-        Jangan mengarang hasilnya!</p>
-        ${isCoin ? '' : DICE_LEGEND}
-        <div class="toss-btns">${btns}
-          <button class="btn small ghost" data-act="undo">Hapus terakhir</button>
-          <button class="btn small ghost" data-act="reset">Mulai ulang</button></div>
-        <div class="progress-bar"><span style="width:${Math.min(100, (bits / ent) * 100)}%"></span></div>
-        <p class="muted">${Math.min(bits, ent)} / ${ent} bit${state.manual.length ? ` · ${state.manual.length} lemparan` : ''}. Frasa di bawah masih dari entropy sebelumnya sampai catatan lengkap.</p>
-        <div class="tosses">${state.manual.map(isCoin ? coinHTML : dieHTML).join('')}</div>`;
-    } else {
-      body = `<p class="muted">Tempel catatan hasil lemparan koin (0/1) atau entropy hex, ${ent} bit untuk ${el.countSel.value} kata.</p>
+    const body = state.source === 'input'
+      ? `<p class="muted">Masukkan entropy hex (${ent / 4} karakter = ${ent} bit untuk ${el.countSel.value} kata) atau biner 0/1.</p>
         <div class="ent-input-row">
-          <input id="entInput" type="text" placeholder="contoh: 0110… (${ent} bit) atau hex" autocomplete="off" spellcheck="false">
+          <input id="entInput" type="text" placeholder="contoh: 6ba98e8f… (${ent / 4} karakter hex)" autocomplete="off" spellcheck="false">
           <button class="btn small" data-act="use">Hitung</button>
           <button class="btn small ghost" data-act="example" title="Indeks 1 sampai 11 (ability … accident) + 7 bit nol">Contoh materi</button>
-        </div>`;
-    }
+        </div>`
+      : `<p class="muted">Server Python (<code>secrets</code>) membuat ${ent / 4} karakter hex acak (${ent} bit) sebagai entropy.</p>
+        <button class="btn small primary" data-act="auto">Acak lagi</button>`;
     box.innerHTML = `<div class="label sub-label">Sumber entropy</div><div class="filters src-chips">${chips}</div>${body}`;
-  }
-
-  function addManual(v) {
-    const ent = BIP39.entBitsFor(+el.countSel.value);
-    const isCoin = state.source === 'mcoin';
-    if (isCoin ? v > 1 : v < 1 || v > 6) return;
-    state.manual.push(v);
-    const bits = manualBits();
-    if (bits.length >= ent) {
-      const values = state.manual;
-      state.manual = [];
-      stopSpeaking();
-      loadEntropy('speak', BIP39.binToBytes(bits.slice(0, ent)), { type: isCoin ? 'coin' : 'dice', values, manual: true });
-      toast('Lemparan lengkap, frasa dihitung');
-    }
-    render();
   }
 
   function renderCheck() {
@@ -523,8 +453,7 @@
     document.querySelectorAll('.tab').forEach((t) => { t.onclick = () => setMode(t.dataset.mode); });
     el.countSel.onchange = async () => {
       stopSpeaking();
-      state.manual = [];
-      await newGame(state.mode, +el.countSel.value, state.mode === 'speak' ? autoKind() : 'coin');
+      await newGame(state.mode, +el.countSel.value);
       render();
     };
     $('btnNewLetters').onclick = async () => { if (await newGame('vocab', +el.countSel.value)) { render(); toast('Frasa baru dibuat, huruf diacak'); } };
@@ -554,7 +483,7 @@
       render();
       if (g.revealed) $('sim').scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
-    $('btnGenerate').onclick = async () => { stopSpeaking(); if (await newGame('speak', +el.countSel.value, autoKind())) { render(); toast('Frasa baru dibuat'); } };
+    $('btnGenerate').onclick = async () => { stopSpeaking(); if (await newGame('speak', +el.countSel.value)) { render(); toast('Frasa baru dibuat'); } };
     $('btnSpeakAll').onclick = speakAll;
     $('btnRandomWord').onclick = async () => {
       const g = state.vocab;
@@ -569,21 +498,17 @@
       if (!b) return;
       if (b.dataset.src) {
         state.source = b.dataset.src;
-        state.manual = [];
         render();
         return;
       }
       const act = b.dataset.act;
-      if (act === 'auto') { stopSpeaking(); if (await newGame('speak', +el.countSel.value, autoKind())) render(); }
-      else if (act === 'v') addManual(+b.dataset.v);
-      else if (act === 'undo') { state.manual.pop(); render(); }
-      else if (act === 'reset') { state.manual = []; render(); }
+      if (act === 'auto') { stopSpeaking(); if (await newGame('speak', +el.countSel.value)) render(); }
       else if (act === 'example' || act === 'use') {
         const input = $('entInput');
         if (act === 'example') input.value = exampleEntropyBits();
         try {
           stopSpeaking();
-          loadEntropy('speak', BIP39.parseEntropy(input.value), { type: 'input', values: [] });
+          loadEntropy('speak', BIP39.parseEntropy(input.value), { type: 'input' });
           const val = input.value;
           render();
           $('entInput').value = val;
@@ -593,12 +518,6 @@
         }
       }
     };
-    document.addEventListener('keydown', (e) => {
-      if (state.mode !== 'speak' || !['mcoin', 'mdice'].includes(state.source)) return;
-      if (e.target.closest('input, select, textarea') || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (/^[0-6]$/.test(e.key)) { e.preventDefault(); addManual(+e.key); }
-      else if (e.key === 'Backspace') { e.preventDefault(); state.manual.pop(); render(); }
-    });
 
     el.search.oninput = renderDict;
     el.search.onkeydown = (e) => {
@@ -638,7 +557,7 @@
     for (const m of ['vocab', 'speak']) {
       if (state[m].entHex) continue;
       // kalau server Python belum bisa dihubungi, pakai contoh materi dulu supaya halaman tetap tampil
-      if (!(await newGame(m, 24))) loadEntropy(m, BIP39.binToBytes(exampleEntropyBits()), { type: 'input', values: [] });
+      if (!(await newGame(m, 24))) loadEntropy(m, BIP39.binToBytes(exampleEntropyBits()), { type: 'input' });
     }
     $('sortSel').value = state.sort;
     bind();
