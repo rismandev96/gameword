@@ -24,7 +24,7 @@ Semua langkah ditampilkan di panel **Simulasi matematis BIP-39**.
 
 - **Entropy lemah (demo serangan)**: frasa 12 kata dibuat dari entropy yang lemah, lalu tombol **Serang** mencoba menebaknya
   langsung di browser (`weak.js`). Skenario: pola mudah (semua nol, `0123…`), brain wallet (SHA-256 dari tanggal lahir,
-  nama, PIN), pengacak lemah yang di-seed jam (mulberry32, mirip modul `random`), dan bocor (termasuk menampilkan entropy
+  nama, PIN, dengan ruang tebakan ±19 miliar: PIN/nomor 1–10 digit, leetspeak, gabungan 2–3 kata; serangan dibatasi ~12 detik lalu dilaporkan apa adanya), pengacak lemah yang di-seed jam (mulberry32, mirip modul `random`), dan bocor (termasuk menampilkan entropy
   yang disimpan app ini di browser). Hasilnya dibandingkan dengan entropy kuat 2^128. Demo ini hanya mencocokkan entropy
   frasa buatan app sendiri, tidak memeriksa alamat atau saldo dompet apa pun.
 

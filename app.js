@@ -423,9 +423,14 @@
     // 2^128 kemungkinan, penyerang super cepat 1 triliun tebakan/detik
     const years = 2 ** 128 / 1e12 / 3.15576e7;
     const perSec = res && res.ms > 0 ? res.tries / (res.ms / 1000) : 0;
+    const left = res?.found
+      ? `Ketemu setelah <b>${fmt(res.tries)}</b> tebakan, dalam <b>${(res.ms / 1000).toLocaleString('id-ID', { maximumFractionDigits: 2 })} detik</b>`
+      : res?.total
+        ? `Seluruh ruang tebakan daftar ini cuma <b>±${fmt(res.total)}</b> kemungkinan — besar, tapi tetap terbatas dan bisa dihabiskan`
+        : 'Ruang tebakannya kecil';
     return `<div class="compare">
       <div><div class="label">Entropy lemah ini</div>
-        <p>${res?.found ? `Ketemu setelah <b>${fmt(res.tries)}</b> tebakan, dalam <b>${(res.ms / 1000).toLocaleString('id-ID', { maximumFractionDigits: 2 })} detik</b>` : 'Ruang tebakannya kecil'}
+        <p>${left}
         ${perSec ? `<br><span class="muted">kecepatan browser ini ±${fmt(perSec)} tebakan/detik</span>` : ''}</p></div>
       <div><div class="label">Entropy kuat 128 bit (acak sungguhan)</div>
         <p>2<sup>128</sup> ≈ 3,4 × 10<sup>38</sup> kemungkinan. Dengan komputer super yang mencoba 1 triliun tebakan/detik:
@@ -454,7 +459,18 @@
         <pre class="bits wrap phrase">${esc(g.answer.join(' '))}</pre>
         ${strongCompareHTML(r)}</div>`;
     }
-    return `<div class="attack"><div class="verdict ok">Tidak ketemu di ±${fmt(r.total)} tebakan sederhana ini</div>
+    if (r.budgetHit) {
+      const perSec = r.ms > 0 ? r.tries / (r.ms / 1000) : 0;
+      const daftar = perSec ? Math.round(r.total / perSec / 86400) : 0;
+      return `<div class="attack"><div class="verdict warn">⏱ Browser ini belum selesai, baru ${fmt(r.tries)} dari ±${fmt(r.total)} kemungkinan</div>
+        <p>Browser di HP/laptop kelas hanya sanggup <b>±${fmt(perSec)} tebakan/detik</b>, jadi menghabiskan ${fmt(r.total)} kemungkinan di daftar ini perlu
+        <b>±${daftar >= 1 ? fmt(daftar) + ' hari' : 'kurang dari sehari'}</b> di sini. Tapi daftar ini belum seberapa:
+        penyerang sungguhan memakai komputer khusus yang mencoba <b>miliaran tebakan per detik</b> dan daftar <b>miliaran kata sandi yang pernah bocor</b>,
+        jadi teks buatan manusia seperti ini biasanya jebol dalam hitungan menit sampai jam.</p>
+        <p class="muted">Klik "Serang" lagi untuk melanjutkan satu putaran lagi, atau coba teks yang lebih pendek/umum untuk melihatnya ketemu.</p>
+        ${strongCompareHTML(r)}</div>`;
+    }
+    return `<div class="attack"><div class="verdict ok">Tidak ketemu di ±${fmt(r.total)} tebakan daftar ini</div>
       <p>Tapi jangan merasa aman: penyerang sungguhan memakai daftar <b>miliaran</b> kata sandi yang pernah bocor dan komputer yang jauh lebih cepat dari browser ini.
       Teks buatan manusia tetap jauh lebih lemah daripada angka acak sungguhan.</p>${strongCompareHTML(r)}</div>`;
   }
@@ -540,7 +556,7 @@
     const cancel = () => token !== attackToken;
     let res;
     if (sc === 'pattern') res = await WeakLab.patternAttack(g.entHex, onProgress, cancel);
-    else if (sc === 'brain') res = await WeakLab.brainAttack(g.entHex, WORDLIST, onProgress, cancel);
+    else if (sc === 'brain') res = await WeakLab.brainAttack(g.entHex, WORDLIST, onProgress, cancel, 12000);
     else res = await WeakLab.seedAttack(g.entHex, Math.floor(Date.now() / 1000), onProgress, cancel);
     if (token !== attackToken) return;
     attackState = { running: false, result: res };

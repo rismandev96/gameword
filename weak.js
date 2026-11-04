@@ -39,6 +39,27 @@
   const SHORT = ['', '1', '12', '123', '1234', '12345', '01', '!', '007', '99'];
   const cap = (s) => s[0].toUpperCase() + s.slice(1);
 
+  // leetspeak: ganti huruf dengan angka/simbol yang mirip (a->4, e->3, i->1/!, o->0, s->5/$)
+  const LEET = { a: ['4', '@'], e: ['3'], i: ['1', '!'], o: ['0'], s: ['5', '$'], t: ['7'] };
+  function* leetVariants(word) {
+    const positions = [];
+    for (let i = 0; i < word.length; i++) if (LEET[word[i]]) positions.push(i);
+    const cap = Math.min(positions.length, 4); // batasi supaya tidak meledak per kata
+    const used = positions.slice(0, cap);
+    const combos = 1 << used.length;
+    for (let mask = 0; mask < combos; mask++) {
+      const opt = [];
+      let ok = true;
+      for (let b = 0; b < used.length; b++) {
+        if (mask & (1 << b)) { const r = LEET[word[used[b]]]; opt.push([used[b], r]); }
+      }
+      // pilih varian pertama tiap posisi (cukup untuk demo; menjaga ukuran wajar)
+      let s = word.split('');
+      for (const [pos, reps] of opt) s[pos] = reps[0];
+      yield s.join('');
+    }
+  }
+
   // Daftar tebakan, urut dari yang paling sering dipakai orang. Tiap item: [kategori, ukuran, generator]
   function brainGuessLists(bip39Words) {
     const withSuffix = function* (words, suffixes) {
@@ -53,19 +74,36 @@
         }
       }
     };
+    // angka 1–10 digit: mencakup PIN, tanggal, dan nomor HP yang sering dipakai sebagai "sandi"
     const pins = function* () {
-      for (let len = 1; len <= 6; len++) for (let i = 0, max = 10 ** len; i < max; i++) yield String(i).padStart(len, '0');
+      for (let len = 1; len <= 10; len++) for (let i = 0, max = 10 ** len; i < max; i++) yield String(i).padStart(len, '0');
+    };
+    // gabungan dua kata umum, dengan pemisah & akhiran: "sayangku", "cinta123", "budi_dewi"
+    const wordPairs = function* (words, seps, suffixes) {
+      for (const a of words) for (const b of words) for (const sep of seps) for (const s of suffixes) yield a + sep + b + s;
+    };
+    const leetAll = function* (words) {
+      for (const w of words) { for (const v of leetVariants(w)) yield v; for (const v of leetVariants(cap(w))) yield v; }
     };
     let dateCount = 0;
     for (let y = 1940; y <= 2026; y++) for (let m = 1; m <= 12; m++) dateCount += new Date(y, m, 0).getDate();
     const sfx = [...SHORT, ...YEARS];
+    const WL = bip39Words.length;
+    const allWords = [...COMMON, ...NAMES];
+    const pairSeps = ['', '1', '!', '_', '.', '-', '12', '123', '2024', '2025'];
+    const pairSfx = ['', '1', '12', '123', '!', '123!'];
+    const leetSize = (ws) => ws.reduce((n, w) => { let p = 0; for (const c of w) if (LEET[c]) p++; return n + 2 * (1 << Math.min(p, 4)); }, 0);
     return [
-      ['Kata sandi populer', (COMMON.length) * sfx.length * 2, () => withSuffix(COMMON, sfx)],
-      ['Nama orang + angka', NAMES.length * sfx.length * 2, () => withSuffix(NAMES, sfx)],
-      ['Kata BIP-39 + angka', bip39Words.length * 6 * 2, () => withSuffix(bip39Words, ['', '1', '12', '123', '1234', '!'])],
+      ['Kata sandi populer + angka', COMMON.length * sfx.length * 2, () => withSuffix(COMMON, sfx)],
+      ['Nama orang + angka/tahun', NAMES.length * sfx.length * 2, () => withSuffix(NAMES, sfx)],
+      ['Kata BIP-39 + angka', WL * 8 * 2, () => withSuffix(bip39Words, ['', '1', '12', '123', '1234', '12345', '!', '123!'])],
       ['Tanggal lahir (DDMMYYYY)', dateCount, () => dates('dmy')],
       ['Tanggal lahir (YYYYMMDD)', dateCount, () => dates('ymd')],
-      ['PIN angka 1–6 digit', 1111110, pins],
+      ['PIN, tanggal & nomor HP 1–10 digit', 11111111110, pins],
+      ['Variasi leetspeak (p4ssw0rd)', leetSize(allWords), () => leetAll(allWords)],
+      ['Gabungan dua kata (sayang_budi123)', allWords.length * allWords.length * pairSeps.length * pairSfx.length, () => wordPairs(allWords, pairSeps, pairSfx)],
+      ['Dua kata BIP-39 (ocean-tiger)', WL * WL * 3, function* () { for (const a of bip39Words) for (const b of bip39Words) for (const sep of ['', ' ', '-']) yield a + sep + b; }],
+      ['Tiga kata BIP-39 (ocean tiger lamp)', WL * WL * WL, function* () { for (const a of bip39Words) for (const b of bip39Words) for (const c of bip39Words) yield a + ' ' + b + ' ' + c; }],
     ];
   }
 
@@ -95,7 +133,9 @@
   const sameBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 
   // lists: [[kategori, ukuran, () => iterator kandidat]], toEntropy: kandidat -> Uint8Array
-  async function attack(targetHex, lists, toEntropy, onProgress, cancel) {
+  // opts.maxMs: batas waktu (ms). Kalau terlewat, berhenti dengan budgetHit:true (bukan berarti aman).
+  async function attack(targetHex, lists, toEntropy, onProgress, cancel, opts = {}) {
+    const maxMs = opts.maxMs || Infinity;
     const target = Uint8Array.from(targetHex.match(/.{2}/g), (h) => parseInt(h, 16));
     const total = lists.reduce((n, l) => n + l[1], 0);
     const t0 = performance.now();
@@ -105,6 +145,9 @@
         tries++;
         if (sameBytes(toEntropy(cand), target)) {
           return { found: true, candidate: cand, category, tries, total, ms: performance.now() - t0 };
+        }
+        if ((tries & 0x3fff) === 0 && performance.now() - t0 > maxMs) {
+          return { found: false, budgetHit: true, tries, total, category, ms: performance.now() - t0 };
         }
         if (performance.now() - lastYield > 30) {
           onProgress?.(tries, total, category);
@@ -121,8 +164,8 @@
     attack(targetHex, [['Daftar pola terkenal', PATTERNS.length, () => PATTERNS.map((p) => p[2])[Symbol.iterator]()]],
       (hex) => Uint8Array.from(hex.match(/.{2}/g), (h) => parseInt(h, 16)), onProgress, cancel);
 
-  const brainAttack = (targetHex, bip39Words, onProgress, cancel) =>
-    attack(targetHex, brainGuessLists(bip39Words), brainEntropy, onProgress, cancel);
+  const brainAttack = (targetHex, bip39Words, onProgress, cancel, maxMs) =>
+    attack(targetHex, brainGuessLists(bip39Words), brainEntropy, onProgress, cancel, { maxMs });
 
   // coba semua detik dari sekarang mundur 24 jam
   function seedAttack(targetHex, nowSec, onProgress, cancel) {

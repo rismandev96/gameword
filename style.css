@@ -211,6 +211,7 @@ code.break { word-break: break-all; }
 .verdict { padding: 10px 12px; border-radius: 8px; margin: 12px 0 8px; font-weight: 600; }
 .verdict.ok { background: rgba(63, 178, 127, 0.15); color: #6fe0ab; }
 .verdict.bad { background: rgba(224, 96, 94, 0.15); color: #f08b89; }
+.verdict.warn { background: rgba(242, 184, 75, 0.15); color: #f2c879; }
 .bits.brk { white-space: pre-wrap; word-break: break-all; }
 
 /* sumber entropy: angka hex acak */
