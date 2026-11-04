@@ -398,7 +398,12 @@
   function loadWeak(scenario, secret) {
     cancelAttack();
     let entropy;
-    if (scenario === 'pattern') entropy = hexToBytes(WeakLab.PATTERNS.find((p) => p[0] === secret)[2]);
+    if (scenario === 'pattern') {
+      // secret = kunci pola bawaan (mis. 'zeros') atau 'custom:<hex>' untuk pola ketikan sendiri
+      entropy = String(secret).startsWith('custom:')
+        ? WeakLab.customPattern(String(secret).slice(7)).bytes
+        : hexToBytes(WeakLab.PATTERNS.find((p) => p[0] === secret)[2]);
+    }
     else if (scenario === 'brain') entropy = WeakLab.brainEntropy(secret);
     else entropy = WeakLab.seedEntropy(secret);
     loadEntropy('weak', entropy, { type: 'weak', scenario, secret: String(secret) });
@@ -406,8 +411,12 @@
 
   function weakIntroHTML(src, ENT) {
     if (src.scenario === 'pattern') {
-      const p = WeakLab.PATTERNS.find((x) => x[0] === src.secret);
-      return `Entropy ${ENT} bit dibuat dari <b>pola mudah: ${esc(p ? p[1] : src.secret)}</b>. Tidak ada yang acak sama sekali.`;
+      const p = !src.secret.startsWith('custom:') && WeakLab.PATTERNS.find((x) => x[0] === src.secret);
+      if (p) return `Entropy ${ENT} bit dibuat dari <b>pola mudah: ${esc(p[1])}</b>. Tidak ada yang acak sama sekali.`;
+      let seed = src.secret.replace(/^custom:/, '');
+      try { seed = WeakLab.customPattern(seed).seed; } catch (_) {}
+      return `Entropy ${ENT} bit dibuat dari <b>pola ketikan sendiri</b>: <code>${esc(seed)}</code> diulang-ulang sampai ${ENT / 4} karakter hex.
+        Tidak ada yang acak sama sekali.`;
     }
     if (src.scenario === 'brain') {
       const h = BIP39.bytesToHex(BIP39.sha256(new TextEncoder().encode(src.secret)));
@@ -438,6 +447,19 @@
     </div>`;
   }
 
+  // nama pola yang ditemukan: label pola bawaan, atau potongan terpendek yang diulang-ulang
+  function patternName(hex) {
+    const preset = WeakLab.PATTERNS.find((p) => p[2] === hex);
+    if (preset) return `pola <code>${esc(preset[1])}</code>`;
+    for (let len = 1; len <= hex.length; len++) {
+      const seed = hex.slice(0, len);
+      if (seed.repeat(Math.ceil(hex.length / len)).slice(0, hex.length) === hex) {
+        return `pola <code>${esc(seed)}</code> yang diulang-ulang (<code class="break">${esc(hex)}</code>)`;
+      }
+    }
+    return `pola <code class="break">${esc(hex)}</code>`;
+  }
+
   function attackHTML() {
     const a = attackState;
     if (!a) return '';
@@ -450,9 +472,9 @@
     const r = a.result;
     if (r.cancelled) return '<div class="attack"><p class="muted">Serangan dihentikan.</p></div>';
     const g = state.weak;
-    const shown = g.src.scenario === 'seed'
+    const shown = !r.found ? '' : g.src.scenario === 'seed'
       ? `seed <code>${esc(r.candidate)}</code> = ${esc(fmtTime(+r.candidate))}`
-      : g.src.scenario === 'brain' ? `teks <code>${esc(r.candidate)}</code>` : `pola <code>${esc(WeakLab.PATTERNS.find((p) => p[2] === r.candidate)?.[1] || r.candidate)}</code>`;
+      : g.src.scenario === 'brain' ? `teks <code>${esc(r.candidate)}</code>` : patternName(r.candidate);
     if (r.found) {
       return `<div class="attack found"><div class="verdict bad">✗ Frasa berhasil ditebak penyerang</div>
         <p>Ditemukan: ${shown} (kategori: ${esc(r.category)}). Dari situ penyerang langsung tahu ke-12 katanya:</p>
@@ -469,6 +491,14 @@
         jadi teks buatan manusia seperti ini biasanya jebol dalam hitungan menit sampai jam.</p>
         <p class="muted">Klik "Serang" lagi untuk melanjutkan satu putaran lagi, atau coba teks yang lebih pendek/umum untuk melihatnya ketemu.</p>
         ${strongCompareHTML(r)}</div>`;
+    }
+    if (g.src.scenario === 'pattern') {
+      const seed = String(g.src.secret).replace(/^custom:/, '');
+      const space = 16 ** seed.length;
+      return `<div class="attack"><div class="verdict warn">Pola <code>${esc(seed)}</code> (${seed.length} karakter) tidak ada di daftar demo ini (±${fmt(r.total)} pola)</div>
+        <p>Tapi tetap lemah: semua pola berulang sepanjang ${seed.length} karakter hex hanya ada <b>16<sup>${seed.length}</sup> ≈ ${fmt(space)}</b> kemungkinan.
+        ${space <= 1e13 ? 'Komputer penyerang yang mencoba miliaran tebakan per detik menghabiskannya dalam hitungan detik sampai jam.' : ''}
+        Bandingkan dengan entropy acak sungguhan: 2<sup>128</sup> ≈ 3,4 × 10<sup>38</sup>.</p>${strongCompareHTML(r)}</div>`;
     }
     return `<div class="attack"><div class="verdict ok">Tidak ketemu di ±${fmt(r.total)} tebakan daftar ini</div>
       <p>Tapi jangan merasa aman: penyerang sungguhan memakai daftar <b>miliaran</b> kata sandi yang pernah bocor dan komputer yang jauh lebih cepat dari browser ini.
@@ -511,10 +541,15 @@
     const busy = attackState?.running ? ' disabled' : '';
     let body = '';
     if (sc === 'pattern') {
+      const isCustom = src.scenario === 'pattern' && String(src.secret).startsWith('custom:');
       const opts = WeakLab.PATTERNS.map(([k, l]) => `<option value="${k}"${src.scenario === 'pattern' && src.secret === k ? ' selected' : ''}>${esc(l)}</option>`).join('');
+      const customVal = isCustom ? esc(src.secret.slice(7)) : '';
       body = `<p>Orang yang malas sering memakai pola mudah, misalnya angka nol semua. Bot penyerang selalu mengecek pola-pola terkenal ini lebih dulu.</p>
         <div class="ent-input-row"><select id="weakPattern">${opts}</select>
-        <button class="btn small" data-wact="make"${busy}>Buat frasa</button></div>`;
+        <button class="btn small" data-wact="make"${busy}>Buat frasa</button></div>
+        <p class="muted">Atau ketik pola sendiri (karakter hex 0-9 dan a-f). Polanya diulang-ulang sampai 32 karakter = 128 bit.</p>
+        <div class="ent-input-row"><input id="weakPatternCustom" type="text" maxlength="32" placeholder="contoh: cafe, 1234, abc, 00ff" autocomplete="off" spellcheck="false" value="${customVal}">
+        <button class="btn small" data-wact="makeCustom"${busy}>Buat frasa dari pola ini</button></div>`;
     } else if (sc === 'brain') {
       body = `<p>Disebut <b>brain wallet</b>: entropy dibuat dari SHA-256 teks yang mudah diingat, seperti tanggal lahir, nama, atau kata sandi.
         Hasil SHA-256 terlihat acak, padahal penyerang tinggal mencoba teks-teks yang umum.</p>
@@ -580,6 +615,15 @@
         } else loadWeak('seed', Math.floor(Date.now() / 1000));
         render();
         toast('Frasa dibuat dari entropy lemah');
+      } else if (act === 'makeCustom') {
+        try {
+          stopSpeaking();
+          loadWeak('pattern', 'custom:' + WeakLab.customPattern($('weakPatternCustom').value).seed);
+          render();
+          toast('Frasa dibuat dari pola ketikanmu');
+        } catch (err) {
+          toast(err.message);
+        }
       } else if (act === 'attack') runAttack();
       else if (act === 'stop') { cancelAttack(); attackState = { running: false, result: { cancelled: true } }; renderWeak(); }
       else if (act === 'wipe') {
@@ -590,6 +634,7 @@
     };
     $('weakPanel').onkeydown = (e) => {
       if (e.key === 'Enter' && e.target.id === 'weakText') $('weakPanel').querySelector('[data-wact=make]')?.click();
+      if (e.key === 'Enter' && e.target.id === 'weakPatternCustom') $('weakPanel').querySelector('[data-wact=makeCustom]')?.click();
     };
   }
 

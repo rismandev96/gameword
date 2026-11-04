@@ -24,6 +24,17 @@
     ['cafe', 'cafebabe…', 'cafebabe'.repeat(4)],
   ];
 
+  // Pola ketikan sendiri: seed hex pendek (mis. "cafe") diulang-ulang jadi 32 hex = 128 bit.
+  function customPattern(text) {
+    const seed = String(text).replace(/\s+/g, '').toLowerCase();
+    if (!seed) throw new Error('Ketik polanya dulu');
+    if (!/^[0-9a-f]+$/.test(seed)) throw new Error('Pola hanya boleh karakter hex: 0-9 dan a-f');
+    let h = '';
+    while (h.length < 32) h += seed;
+    h = h.slice(0, 32);
+    return { seed, hex: h, bytes: Uint8Array.from(h.match(/.{2}/g), (x) => parseInt(x, 16)) };
+  }
+
   // ---------- 2. Brain wallet: entropy = SHA-256(teks), diambil 128 bit pertama ----------
   const brainEntropy = (text) => B.sha256(enc.encode(text)).slice(0, ENT_BYTES);
 
@@ -160,9 +171,23 @@
     return { found: false, tries, total, ms: performance.now() - t0 };
   }
 
+  // semua pola berulang pendek: seed 1–4 karakter hex (0, 00…ff, 000…fff, 0000…ffff) diulang jadi 32 hex
+  function* tilings(hexLen) {
+    for (let len = 1; len <= 4; len++) {
+      for (let v = 0, max = 16 ** len; v < max; v++) {
+        const seed = v.toString(16).padStart(len, '0');
+        let h = '';
+        while (h.length < hexLen) h += seed;
+        yield h.slice(0, hexLen);
+      }
+    }
+  }
+
   const patternAttack = (targetHex, onProgress, cancel) =>
-    attack(targetHex, [['Daftar pola terkenal', PATTERNS.length, () => PATTERNS.map((p) => p[2])[Symbol.iterator]()]],
-      (hex) => Uint8Array.from(hex.match(/.{2}/g), (h) => parseInt(h, 16)), onProgress, cancel);
+    attack(targetHex, [
+      ['Daftar pola terkenal', PATTERNS.length, () => PATTERNS.map((p) => p[2])[Symbol.iterator]()],
+      ['Semua pola berulang 1–4 karakter', 16 + 256 + 4096 + 65536, () => tilings(targetHex.length)],
+    ], (hex) => Uint8Array.from(hex.match(/.{2}/g), (h) => parseInt(h, 16)), onProgress, cancel);
 
   const brainAttack = (targetHex, bip39Words, onProgress, cancel, maxMs) =>
     attack(targetHex, brainGuessLists(bip39Words), brainEntropy, onProgress, cancel, { maxMs });
@@ -174,5 +199,5 @@
     return attack(targetHex, [['Detik dalam 24 jam terakhir', DAY, gen]], seedEntropy, onProgress, cancel);
   }
 
-  global.WeakLab = { PATTERNS, brainEntropy, seedEntropy, patternAttack, brainAttack, seedAttack };
+  global.WeakLab = { PATTERNS, customPattern, brainEntropy, seedEntropy, patternAttack, brainAttack, seedAttack };
 })(window);
