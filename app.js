@@ -542,7 +542,9 @@
     let body = '';
     if (sc === 'pattern') {
       const isCustom = src.scenario === 'pattern' && String(src.secret).startsWith('custom:');
-      const opts = WeakLab.PATTERNS.map(([k, l]) => `<option value="${k}"${src.scenario === 'pattern' && src.secret === k ? ' selected' : ''}>${esc(l)}</option>`).join('');
+      const groups = [...new Set(WeakLab.PATTERNS.map((p) => p[3]))];
+      const opts = groups.map((grp, gi) => `<optgroup label="${gi + 1}. ${esc(grp)}">${WeakLab.PATTERNS.filter((p) => p[3] === grp)
+        .map(([k, l]) => `<option value="${k}"${src.scenario === 'pattern' && src.secret === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</optgroup>`).join('');
       const customVal = isCustom ? esc(src.secret.slice(7)) : '';
       body = `<p>Orang yang malas sering memakai pola mudah, misalnya angka nol semua. Bot penyerang selalu mengecek pola-pola terkenal ini lebih dulu.</p>
         <div class="ent-input-row"><select id="weakPattern">${opts}</select>

@@ -9,19 +9,65 @@
   const ENT_BYTES = 16; // semua demo memakai 12 kata = 128 bit
 
   // ---------- 1. Pola mudah ----------
+  // [kunci, label, hex 128 bit, kelompok]. Semua nilai sudah dicek ulang (SHA-256, ASCII, kata yang dihasilkan).
   const PATTERNS = [
-    ['zeros', 'Semua nol', '00'.repeat(16)],
-    ['ones', 'Semua satu (ffff…)', 'ff'.repeat(16)],
-    ['alt10', 'Pola 1010… (aaaa…)', 'aa'.repeat(16)],
-    ['alt01', 'Pola 0101… (5555…)', '55'.repeat(16)],
-    ['seq', 'Urutan 0123456789abcdef…', '0123456789abcdef'.repeat(2)],
-    ['rev', 'Urutan mundur fedcba98…', 'fedcba9876543210'.repeat(2)],
-    ['7f', 'Pola 7f7f…', '7f'.repeat(16)],
-    ['80', 'Pola 8080…', '80'.repeat(16)],
-    ['dead', 'deadbeef…', 'deadbeef'.repeat(4)],
-    ['one', 'Angka 1 lalu nol semua', '00'.repeat(15) + '01'],
-    ['11', 'Pola 1111… (1111…)', '11'.repeat(16)],
-    ['cafe', 'cafebabe…', 'cafebabe'.repeat(4)],
+    // 1. Dasar & bitwise
+    ['zeros', 'Semua nol (= Unix epoch 0)', '00'.repeat(16), 'Dasar & bitwise'],
+    ['ones', 'Semua satu (ffff…)', 'ff'.repeat(16), 'Dasar & bitwise'],
+    ['msb', 'Angka 1 di awal (8000…)', '8' + '0'.repeat(31), 'Dasar & bitwise'],
+    ['msb1', 'Angka 1 di awal (1000…)', '1' + '0'.repeat(31), 'Dasar & bitwise'],
+    ['one', 'Angka 1 di akhir (…0001)', '00'.repeat(15) + '01', 'Dasar & bitwise'],
+    ['alt10', 'Pola 1010… (aaaa…)', 'aa'.repeat(16), 'Dasar & bitwise'],
+    ['alt01', 'Pola 0101… (5555…)', '55'.repeat(16), 'Dasar & bitwise'],
+    ['11', 'Pola 1111… (1111…)', '11'.repeat(16), 'Dasar & bitwise'],
+    ['7f', 'Pola 7f7f…', '7f'.repeat(16), 'Dasar & bitwise'],
+    ['80', 'Pola 8080…', '80'.repeat(16), 'Dasar & bitwise'],
+    ['f0', 'Selang-seling nibble f0f0…', 'f0'.repeat(16), 'Dasar & bitwise'],
+    ['0f', 'Selang-seling nibble 0f0f…', '0f'.repeat(16), 'Dasar & bitwise'],
+    ['00ff', 'Selang-seling byte 00ff…', '00ff'.repeat(8), 'Dasar & bitwise'],
+    ['ff00', 'Selang-seling byte ff00…', 'ff00'.repeat(8), 'Dasar & bitwise'],
+    ['half01', 'Setengah nol, setengah satu', '0'.repeat(16) + 'f'.repeat(16), 'Dasar & bitwise'],
+    ['half10', 'Setengah satu, setengah nol', 'f'.repeat(16) + '0'.repeat(16), 'Dasar & bitwise'],
+    // 2. Urutan
+    ['seq', 'Urutan maju hex 0123…f', '0123456789abcdef'.repeat(2), 'Urutan'],
+    ['rev', 'Urutan mundur hex fedc…0', 'fedcba9876543210'.repeat(2), 'Urutan'],
+    ['byteseq', 'Urutan byte maju 00 01 02 … 0f', '000102030405060708090a0b0c0d0e0f', 'Urutan'],
+    ['byterev', 'Urutan byte mundur 0f 0e … 00', '0f0e0d0c0b0a09080706050403020100', 'Urutan'],
+    // 3. Hexspeak & memory debug
+    ['dead', 'deadbeef…', 'deadbeef'.repeat(4), 'Hexspeak & memory debug'],
+    ['cafe', 'cafebabe…', 'cafebabe'.repeat(4), 'Hexspeak & memory debug'],
+    ['deadc0de', 'deadc0de…', 'deadc0de'.repeat(4), 'Hexspeak & memory debug'],
+    ['8badf00d', '8badf00d… (crash iOS)', '8badf00d'.repeat(4), 'Hexspeak & memory debug'],
+    ['baadf00d', 'baadf00d… (heap Windows)', 'baadf00d'.repeat(4), 'Hexspeak & memory debug'],
+    ['cccc', 'cccc… (stack MSVC)', 'cc'.repeat(16), 'Hexspeak & memory debug'],
+    ['cdcd', 'cdcd… (heap MSVC)', 'cd'.repeat(16), 'Hexspeak & memory debug'],
+    ['feee', 'feeefeee… (memori sudah dibebaskan)', 'feee'.repeat(8), 'Hexspeak & memory debug'],
+    // 4. Bug konversi ASCII (teks langsung dipakai sebagai byte)
+    ['a0', 'ASCII "0000000000000000"', '30'.repeat(16), 'Bug konversi ASCII'],
+    ['a1', 'ASCII "1111111111111111"', '31'.repeat(16), 'Bug konversi ASCII'],
+    ['a1234', 'ASCII "1234567890123456"', '31323334353637383930313233343536', 'Bug konversi ASCII'],
+    ['aabc', 'ASCII "abcdef0123456789"', '61626364656630313233343536373839', 'Bug konversi ASCII'],
+    ['aqwe', 'ASCII "qwertyuiopasdfgh"', '71776572747975696f70617364666768', 'Bug konversi ASCII'],
+    ['apass', 'ASCII "passwordpassword"', '70617373776f726470617373776f7264', 'Bug konversi ASCII'],
+    ['aspace', 'ASCII 16 spasi', '20'.repeat(16), 'Bug konversi ASCII'],
+    // 5. Hash / brain wallet (16 byte pertama SHA-256)
+    ['hempty', 'SHA-256("") — teks kosong', 'e3b0c44298fc1c149afbf4c8996fb924', 'Hash / brain wallet'],
+    ['h0', 'SHA-256("0")', '5feceb66ffc86f38d952786c6d696c79', 'Hash / brain wallet'],
+    ['h1', 'SHA-256("1")', '6b86b273ff34fce19d6b804eff5a3f57', 'Hash / brain wallet'],
+    ['h123456', 'SHA-256("123456")', '8d969eef6ecad3c29a3a629280e686cf', 'Hash / brain wallet'],
+    ['hpass', 'SHA-256("password")', '5e884898da28047151d0e56f8dc62927', 'Hash / brain wallet'],
+    ['hbtc', 'SHA-256("bitcoin")', '6b88c087247aa2f07ee1c5956b8e1a9f', 'Hash / brain wallet'],
+    ['hsat', 'SHA-256("satoshi")', 'da2876b3eb31edb4436fa4650673fc6f', 'Hash / brain wallet'],
+    // 6. PRNG terpotong & timestamp
+    ['p32a', 'PRNG 32-bit + nol di belakang', '65432100' + '0'.repeat(24), 'PRNG terpotong & timestamp'],
+    ['p32b', 'PRNG 32-bit + nol di depan', '0'.repeat(24) + '65432100', 'PRNG terpotong & timestamp'],
+    ['p64', 'PRNG 64-bit + nol', '0123456789abcdef' + '0'.repeat(16), 'PRNG terpotong & timestamp'],
+    ['clone', 'Potongan 32-bit berulang (bug clone)', '1a2b3c4d'.repeat(4), 'PRNG terpotong & timestamp'],
+    ['ts1700', 'Unix timestamp 1700000000 (+ nol)', '0'.repeat(24) + '6553f100', 'PRNG terpotong & timestamp'],
+    // 7. Menghasilkan kata tertentu
+    ['zoo', 'zoo ×11 + what', 'f'.repeat(31) + 'c', 'Menghasilkan kata tertentu'],
+    ['bacon', 'bacon ×11 + awkward', '1142284508a1142284508a1142284508', 'Menghasilkan kata tertentu'],
+    ['urut', 'abandon ability able … (indeks 0–10)', '00000401003008014030070100240500', 'Menghasilkan kata tertentu'],
   ];
 
   // Pola ketikan sendiri: seed hex pendek (mis. "cafe") diulang-ulang jadi 32 hex = 128 bit.
