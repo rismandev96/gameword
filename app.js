@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const STORE_KEY = 'tebak-kata-v6';
+  const STORE_KEY = 'tebak-kata-v7';
   const VALID_COUNTS = [12, 15, 18, 21, 24];
 
   const $ = (id) => document.getElementById(id);
@@ -17,10 +17,11 @@
   let RANK = new Map();       // kata -> peringkat kata umum (untuk urutan "Paling umum")
   let DICT = {};              // huruf -> [kata, ...]
 
-  // src = asal entropy: { type: 'hex' | 'input', python: bool }
+  // src = asal entropy: { type: 'hex' | 'input' | 'weak', python: bool, scenario, secret }
   const blankGame = () => ({ count: 24, entHex: '', src: null, answer: [], letters: [], words: [], active: 0, checked: false, revealed: false });
   // source = pilihan sumber entropy di mode speaking: hex (acak Python) | input (ketik)
-  let state = { mode: 'vocab', sort: 'az', source: 'hex', vocab: blankGame(), speak: blankGame() };
+  // weakScenario = skenario di tab Entropy lemah: pattern | brain | seed | leak
+  let state = { mode: 'vocab', sort: 'az', source: 'hex', weakScenario: 'pattern', vocab: blankGame(), speak: blankGame(), weak: blankGame() };
   const game = () => state[state.mode];
 
   // ---------- util ----------
@@ -35,18 +36,22 @@
     try {
       const s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
       if (!s) return;
-      state.mode = s.mode === 'speak' ? 'speak' : 'vocab';
+      state.mode = ['speak', 'weak'].includes(s.mode) ? s.mode : 'vocab';
+      if (['pattern', 'brain', 'seed', 'leak'].includes(s.weakScenario)) state.weakScenario = s.weakScenario;
       state.sort = s.sort === 'common' ? 'common' : 'az';
       if (['hex', 'input'].includes(s.source)) state.source = s.source;
-      for (const m of ['vocab', 'speak']) {
+      for (const m of ['vocab', 'speak', 'weak']) {
         const g = s[m];
         if (!g || !/^[0-9a-f]+$/.test(g.entHex || '')) continue;
         const sim = BIP39.fromEntropy(hexToBytes(g.entHex), WORDLIST);
         const words = sim.words;
-        const src = g.src && ['hex', 'input'].includes(g.src.type) ? { type: g.src.type, python: !!g.src.python } : null;
+        let src = g.src && ['hex', 'input'].includes(g.src.type) ? { type: g.src.type, python: !!g.src.python } : null;
+        if (g.src?.type === 'weak' && ['pattern', 'brain', 'seed'].includes(g.src.scenario)) {
+          src = { type: 'weak', scenario: g.src.scenario, secret: String(g.src.secret ?? '').slice(0, 200) };
+        }
         state[m] = {
           ...blankGame(), ...g, src, count: words.length, answer: words, letters: words.map((w) => w[0]),
-          words: m === 'speak' ? words : words.map((_, i) => (INDEX.has(g.words?.[i]) ? g.words[i] : '')),
+          words: m !== 'vocab' ? words : words.map((_, i) => (INDEX.has(g.words?.[i]) ? g.words[i] : '')),
         };
       }
     } catch (_) {}
@@ -70,8 +75,8 @@
     g.entHex = sim.entHex;
     g.answer = sim.words;
     g.letters = sim.words.map((w) => w[0]);
-    g.words = mode === 'speak' ? [...sim.words] : Array(g.count).fill('');
-    g.active = mode === 'speak' ? -1 : 0;
+    g.words = mode !== 'vocab' ? [...sim.words] : Array(g.count).fill('');
+    g.active = mode !== 'vocab' ? -1 : 0;
     g.checked = false;
     g.revealed = false;
   }
@@ -289,9 +294,10 @@
     const { ENT, entBits, entHex } = sim;
     const cells = entHex.split('').map((c, i) =>
       `<span class="hx" title="karakter ${i + 1}"><i>${c}</i><small>${parseInt(c, 16).toString(2).padStart(4, '0')}</small></span>`).join('');
-    const intro = src?.python
-      ? `Server Python (modul <code>secrets</code>) membuat <b>${entHex.length} karakter hex acak</b> = ${entHex.length} × 4 = <b>${ENT} bit</b>.`
-      : `Entropy <b>${ENT} bit</b> (${entHex.length} karakter hex) dimasukkan langsung.`;
+    const intro = src?.type === 'weak' ? weakIntroHTML(src, ENT)
+      : src?.python
+        ? `Server Python (modul <code>secrets</code>) membuat <b>${entHex.length} karakter hex acak</b> = ${entHex.length} × 4 = <b>${ENT} bit</b>.`
+        : `Entropy <b>${ENT} bit</b> (${entHex.length} karakter hex) dimasukkan langsung.`;
     return `
           <h3>Angka acak (entropy)</h3>
           <p>${intro}</p>
@@ -353,7 +359,7 @@
 
   function renderSim() {
     const g = game();
-    if (state.mode === 'speak' || g.revealed) {
+    if (state.mode !== 'vocab' || g.revealed) {
       el.sim.innerHTML = stepsHTML(BIP39.fromEntropy(hexToBytes(g.entHex), WORDLIST), g.src);
     } else {
       el.sim.innerHTML = `<p class="muted">Huruf di atas berasal dari frasa BIP-39 yang <b>valid</b>: entropy dari angka hex acak (Python) → SHA-256 → checksum → 11-bit.
@@ -379,6 +385,196 @@
       : `<p class="muted">Server Python (<code>secrets</code>) membuat ${ent / 4} karakter hex acak (${ent} bit) sebagai entropy.</p>
         <button class="btn small primary" data-act="auto">Acak lagi</button>`;
     box.innerHTML = `<div class="label sub-label">Sumber entropy</div><div class="filters src-chips">${chips}</div>${body}`;
+  }
+
+  // ---------- mode 3: entropy lemah ----------
+  const WEAK_TABS = [['pattern', 'Pola mudah'], ['brain', 'Tanggal lahir / kata sandi'], ['seed', 'Pengacak lemah (pakai jam)'], ['leak', 'Bocor']];
+  const fmt = (n) => Math.round(n).toLocaleString('id-ID');
+  const fmtTime = (sec) => new Date(sec * 1000).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'medium' });
+  let attackState = null;   // { running, progress, total, category, result }
+  let attackToken = 0;
+  const cancelAttack = () => { attackToken++; attackState = null; };
+
+  function loadWeak(scenario, secret) {
+    cancelAttack();
+    let entropy;
+    if (scenario === 'pattern') entropy = hexToBytes(WeakLab.PATTERNS.find((p) => p[0] === secret)[2]);
+    else if (scenario === 'brain') entropy = WeakLab.brainEntropy(secret);
+    else entropy = WeakLab.seedEntropy(secret);
+    loadEntropy('weak', entropy, { type: 'weak', scenario, secret: String(secret) });
+  }
+
+  function weakIntroHTML(src, ENT) {
+    if (src.scenario === 'pattern') {
+      const p = WeakLab.PATTERNS.find((x) => x[0] === src.secret);
+      return `Entropy ${ENT} bit dibuat dari <b>pola mudah: ${esc(p ? p[1] : src.secret)}</b>. Tidak ada yang acak sama sekali.`;
+    }
+    if (src.scenario === 'brain') {
+      const h = BIP39.bytesToHex(BIP39.sha256(new TextEncoder().encode(src.secret)));
+      return `Entropy = SHA-256 dari teks <code>${esc(src.secret)}</code>, diambil ${ENT} bit (${ENT / 4} hex) pertama.
+        SHA-256-nya: <code class="break"><b class="cs">${h.slice(0, ENT / 4)}</b>${h.slice(ENT / 4)}</code>.
+        Kelihatannya acak, tapi siapa pun yang menebak teksnya akan mendapat entropy yang sama persis.`;
+    }
+    return `Entropy dibuat <b>pengacak lemah</b> (mulberry32, mirip modul <code>random</code>) dengan seed = jam saat tombol diklik:
+      <code>${esc(src.secret)}</code> (${esc(fmtTime(+src.secret))}). Seed yang sama selalu menghasilkan angka yang sama.`;
+  }
+
+  function strongCompareHTML(res) {
+    // 2^128 kemungkinan, penyerang super cepat 1 triliun tebakan/detik
+    const years = 2 ** 128 / 1e12 / 3.15576e7;
+    const perSec = res && res.ms > 0 ? res.tries / (res.ms / 1000) : 0;
+    return `<div class="compare">
+      <div><div class="label">Entropy lemah ini</div>
+        <p>${res?.found ? `Ketemu setelah <b>${fmt(res.tries)}</b> tebakan, dalam <b>${(res.ms / 1000).toLocaleString('id-ID', { maximumFractionDigits: 2 })} detik</b>` : 'Ruang tebakannya kecil'}
+        ${perSec ? `<br><span class="muted">kecepatan browser ini ±${fmt(perSec)} tebakan/detik</span>` : ''}</p></div>
+      <div><div class="label">Entropy kuat 128 bit (acak sungguhan)</div>
+        <p>2<sup>128</sup> ≈ 3,4 × 10<sup>38</sup> kemungkinan. Dengan komputer super yang mencoba 1 triliun tebakan/detik:
+        <b>±${years.toExponential(1).replace('.', ',').replace(/e\+(\d+)/, ' × 10<sup>$1</sup>')} tahun</b>. Umur alam semesta baru ±1,4 × 10<sup>10</sup> tahun.</p></div>
+    </div>`;
+  }
+
+  function attackHTML() {
+    const a = attackState;
+    if (!a) return '';
+    if (a.running) {
+      return `<div class="attack running"><div class="label">Penyerang sedang menebak… (${esc(a.category || '')})</div>
+        <div class="progress-bar"><span style="width:${Math.min(100, (a.progress / a.total) * 100)}%"></span></div>
+        <p class="muted">${fmt(a.progress)} dari ±${fmt(a.total)} tebakan</p>
+        <button class="btn small ghost" data-wact="stop">Hentikan</button></div>`;
+    }
+    const r = a.result;
+    if (r.cancelled) return '<div class="attack"><p class="muted">Serangan dihentikan.</p></div>';
+    const g = state.weak;
+    const shown = g.src.scenario === 'seed'
+      ? `seed <code>${esc(r.candidate)}</code> = ${esc(fmtTime(+r.candidate))}`
+      : g.src.scenario === 'brain' ? `teks <code>${esc(r.candidate)}</code>` : `pola <code>${esc(WeakLab.PATTERNS.find((p) => p[2] === r.candidate)?.[1] || r.candidate)}</code>`;
+    if (r.found) {
+      return `<div class="attack found"><div class="verdict bad">✗ Frasa berhasil ditebak penyerang</div>
+        <p>Ditemukan: ${shown} (kategori: ${esc(r.category)}). Dari situ penyerang langsung tahu ke-12 katanya:</p>
+        <pre class="bits wrap phrase">${esc(g.answer.join(' '))}</pre>
+        ${strongCompareHTML(r)}</div>`;
+    }
+    return `<div class="attack"><div class="verdict ok">Tidak ketemu di ±${fmt(r.total)} tebakan sederhana ini</div>
+      <p>Tapi jangan merasa aman: penyerang sungguhan memakai daftar <b>miliaran</b> kata sandi yang pernah bocor dan komputer yang jauh lebih cepat dari browser ini.
+      Teks buatan manusia tetap jauh lebih lemah daripada angka acak sungguhan.</p>${strongCompareHTML(r)}</div>`;
+  }
+
+  function leakHTML() {
+    let stored = [];
+    try {
+      const s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+      for (const m of ['vocab', 'speak']) {
+        if (s?.[m]?.entHex && /^[0-9a-f]+$/.test(s[m].entHex)) {
+          stored.push([m === 'vocab' ? 'Tab Vocab' : 'Tab Speaking', s[m].entHex, BIP39.fromEntropy(hexToBytes(s[m].entHex), WORDLIST).words.join(' ')]);
+        }
+      }
+    } catch (_) {}
+    const rows = stored.map(([where, hex, words]) => `<tr><td>${where}</td><td class="mono break">${hex}</td><td class="word">${esc(words)}</td></tr>`).join('');
+    return `<p>Entropy sekuat apa pun tidak berguna kalau <b>bocor</b>. Contoh kebocoran yang sering terjadi:</p>
+      <ul class="leak-list">
+        <li><b>Difoto / di-screenshot</b>, lalu galeri otomatis ter-backup ke cloud.</li>
+        <li><b>Disimpan di catatan HP, email, chat, atau Google Drive.</b></li>
+        <li><b>Diketik di situs atau aplikasi palsu</b> yang mengaku "validasi" atau "sinkronisasi" dompet.</li>
+        <li><b>Diberikan ke "admin" atau "CS"</b> yang mengaku membantu. Pihak resmi tidak pernah meminta frasa.</li>
+        <li><b>Terlihat orang lain</b> saat ditulis atau dibuka di tempat umum.</li>
+        <li><b>Disimpan di browser</b>, seperti app ini.</li>
+      </ul>
+      <div class="label">Bukti langsung: isi penyimpanan browser app ini sekarang</div>
+      ${rows ? `<div class="table-wrap"><table class="sim-table"><thead><tr><th>Asal</th><th>Entropy tersimpan</th><th>Langsung jadi kata</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="muted">Siapa pun yang memakai browser ini bisa membaca data di atas lewat menu developer, lalu mengubahnya jadi kata dengan rumus BIP-39. Karena itu dompet sungguhan dibuat di perangkat offline dan frasanya ditulis di kertas.</p>
+        <button class="btn small ghost" data-wact="wipe">Hapus data app ini dari browser</button>`
+        : '<p class="muted">Tidak ada entropy tersimpan di browser ini.</p>'}`;
+  }
+
+  function renderWeak() {
+    const box = $('weakPanel');
+    if (state.mode !== 'weak') { box.innerHTML = ''; return; }
+    const sc = state.weakScenario;
+    const chips = WEAK_TABS.map(([k, l]) => `<button class="chip-f${sc === k ? ' active' : ''}" data-wsc="${k}">${l}</button>`).join('');
+    const src = state.weak.src || {};
+    const busy = attackState?.running ? ' disabled' : '';
+    let body = '';
+    if (sc === 'pattern') {
+      const opts = WeakLab.PATTERNS.map(([k, l]) => `<option value="${k}"${src.scenario === 'pattern' && src.secret === k ? ' selected' : ''}>${esc(l)}</option>`).join('');
+      body = `<p>Orang yang malas sering memakai pola mudah, misalnya angka nol semua. Bot penyerang selalu mengecek pola-pola terkenal ini lebih dulu.</p>
+        <div class="ent-input-row"><select id="weakPattern">${opts}</select>
+        <button class="btn small" data-wact="make"${busy}>Buat frasa</button></div>`;
+    } else if (sc === 'brain') {
+      body = `<p>Disebut <b>brain wallet</b>: entropy dibuat dari SHA-256 teks yang mudah diingat, seperti tanggal lahir, nama, atau kata sandi.
+        Hasil SHA-256 terlihat acak, padahal penyerang tinggal mencoba teks-teks yang umum.</p>
+        <div class="ent-input-row"><input id="weakText" type="text" maxlength="60" placeholder="contoh: 17081945, budi123, sayang" autocomplete="off" spellcheck="false"
+          value="${src.scenario === 'brain' ? esc(src.secret) : ''}">
+        <button class="btn small" data-wact="make"${busy}>Buat frasa</button></div>
+        <p class="muted">Jangan ketik kata sandi asli kamu di sini.</p>`;
+    } else if (sc === 'seed') {
+      body = `<p>Pengacak biasa (seperti modul <code>random</code> Python atau <code>Math.random</code>) sering memakai <b>jam</b> sebagai seed.
+        Dalam sehari hanya ada 86.400 detik, jadi penyerang cukup mencoba semua detik itu.</p>
+        <div class="ent-input-row"><button class="btn small" data-wact="make"${busy}>Buat frasa sekarang</button></div>`;
+    } else {
+      body = leakHTML();
+    }
+    const canAttack = sc !== 'leak' && src.scenario === sc;
+    box.innerHTML = `<div class="label sub-label">Skenario entropy lemah</div><div class="filters src-chips">${chips}</div>
+      <div class="weak-body">${body}</div>
+      ${canAttack ? `<div class="attack-row"><button class="btn danger" data-wact="attack"${busy}>Serang! Coba tebak frasanya</button>
+        <span class="muted">Penyerang tidak tahu ${sc === 'pattern' ? 'pola' : sc === 'brain' ? 'teks' : 'jam'} yang kamu pakai, hanya menebak.</span></div>` : ''}
+      ${sc !== 'leak' ? attackHTML() : ''}`;
+  }
+
+  async function runAttack() {
+    const g = state.weak;
+    const sc = g.src.scenario;
+    const token = ++attackToken;
+    attackState = { running: true, progress: 0, total: 1, category: '' };
+    renderWeak();
+    const onProgress = (n, total, category) => {
+      if (token !== attackToken) return;
+      attackState.progress = n; attackState.total = total; attackState.category = category;
+      // perbarui angka & progress bar saja (jangan gambar ulang panel, supaya tombol Hentikan tetap bisa diklik)
+      const box = document.querySelector('#weakPanel .attack.running');
+      if (!box) { renderWeak(); return; }
+      box.querySelector('.label').textContent = `Penyerang sedang menebak… (${category})`;
+      box.querySelector('.progress-bar span').style.width = `${Math.min(100, (n / total) * 100)}%`;
+      box.querySelector('p').textContent = `${fmt(n)} dari ±${fmt(total)} tebakan`;
+    };
+    const cancel = () => token !== attackToken;
+    let res;
+    if (sc === 'pattern') res = await WeakLab.patternAttack(g.entHex, onProgress, cancel);
+    else if (sc === 'brain') res = await WeakLab.brainAttack(g.entHex, WORDLIST, onProgress, cancel);
+    else res = await WeakLab.seedAttack(g.entHex, Math.floor(Date.now() / 1000), onProgress, cancel);
+    if (token !== attackToken) return;
+    attackState = { running: false, result: res };
+    renderWeak();
+  }
+
+  function bindWeak() {
+    $('weakPanel').onclick = (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.wsc) { cancelAttack(); state.weakScenario = b.dataset.wsc; render(); return; }
+      const act = b.dataset.wact;
+      if (act === 'make') {
+        stopSpeaking();
+        const sc = state.weakScenario;
+        if (sc === 'pattern') loadWeak('pattern', $('weakPattern').value);
+        else if (sc === 'brain') {
+          const t = $('weakText').value;
+          if (!t.trim()) { toast('Ketik teksnya dulu'); return; }
+          loadWeak('brain', t);
+        } else loadWeak('seed', Math.floor(Date.now() / 1000));
+        render();
+        toast('Frasa dibuat dari entropy lemah');
+      } else if (act === 'attack') runAttack();
+      else if (act === 'stop') { cancelAttack(); attackState = { running: false, result: { cancelled: true } }; renderWeak(); }
+      else if (act === 'wipe') {
+        try { localStorage.removeItem(STORE_KEY); } catch (_) {}
+        renderWeak();
+        toast('Data app dihapus dari browser (akan tersimpan lagi saat app dipakai)');
+      }
+    };
+    $('weakPanel').onkeydown = (e) => {
+      if (e.key === 'Enter' && e.target.id === 'weakText') $('weakPanel').querySelector('[data-wact=make]')?.click();
+    };
   }
 
   function renderCheck() {
@@ -413,6 +609,7 @@
     renderDict();
     renderOutput();
     renderEntTools();
+    renderWeak();
     renderSim();
     renderCheck();
     save();
@@ -421,7 +618,7 @@
   function onSlot(i) {
     const g = game();
     g.active = i;
-    if (state.mode === 'speak') {
+    if (state.mode !== 'vocab') {
       stopSpeaking();
       speak(g.words[i]);
       render();
@@ -436,6 +633,7 @@
 
   function setMode(mode) {
     stopSpeaking();
+    cancelAttack();
     state.mode = mode;
     if (mode === 'vocab' && game().active < 0) game().active = 0;
     render();
@@ -523,6 +721,7 @@
     el.search.onkeydown = (e) => {
       if (e.key === 'Enter') el.wordList.querySelector('.w')?.click();
     };
+    bindWeak();
     $('sortSel').onchange = (e) => { state.sort = e.target.value; renderDict(); save(); };
     document.querySelectorAll('[data-copy]').forEach((b) => {
       b.onclick = async () => {
@@ -554,6 +753,7 @@
     });
 
     load();
+    if (!state.weak.entHex) loadWeak('pattern', WeakLab.PATTERNS[0][0]);
     for (const m of ['vocab', 'speak']) {
       if (state[m].entHex) continue;
       // kalau server Python belum bisa dihubungi, pakai contoh materi dulu supaya halaman tetap tampil

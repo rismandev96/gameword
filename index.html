@@ -12,6 +12,7 @@
     <div class="brand">
       <h1>Tebak Kata</h1>
       <p class="sub only-vocab">Mode Vocab: huruf berasal dari frasa BIP-39 acak yang disembunyikan. Tebak kata untuk tiap huruf, lalu cek jawabannya.</p>
+      <p class="sub only-weak">Mode Entropy lemah: lihat sendiri kenapa angka acak harus benar-benar acak dan dirahasiakan. Buat frasa dari entropy yang lemah, lalu coba "serang".</p>
       <p class="sub only-speak">Mode Speaking: kata BIP-39 langsung muncul otomatis lewat angka hex acak (entropy) → SHA-256 → checksum. Ucapkan satu per satu, klik kata untuk dengar pelafalannya.</p>
     </div>
   </header>
@@ -19,6 +20,7 @@
   <nav class="tabs" role="tablist">
     <button class="tab active" role="tab" data-mode="vocab">1 · Vocab <span>pilih kata</span></button>
     <button class="tab" role="tab" data-mode="speak">2 · Speaking <span>otomatis</span></button>
+    <button class="tab" role="tab" data-mode="weak">3 · Entropy lemah <span>demo serangan</span></button>
   </nav>
 
   <div class="controls">
@@ -40,6 +42,8 @@
     <button id="btnGenerate" class="btn primary only-speak">Generate baru</button>
     <button id="btnSpeakAll" class="btn only-speak">Dengarkan semua</button>
   </div>
+
+  <section id="weakPanel" class="weak-panel only-weak"></section>
 
   <section class="sequence-wrap">
     <div class="label-row">
@@ -111,6 +115,7 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="bip39.js"></script>
+  <script src="weak.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

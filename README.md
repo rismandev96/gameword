@@ -22,6 +22,12 @@ Semua langkah ditampilkan di panel **Simulasi matematis BIP-39**.
   Sumber entropy: **Acak (Python)** atau **Ketik entropy** (hex/biner, termasuk **Contoh materi**:
   indeks 1–11 + 7 bit nol, yang hasil kata ke-12-nya *absent*).
 
+- **Entropy lemah (demo serangan)**: frasa 12 kata dibuat dari entropy yang lemah, lalu tombol **Serang** mencoba menebaknya
+  langsung di browser (`weak.js`). Skenario: pola mudah (semua nol, `0123…`), brain wallet (SHA-256 dari tanggal lahir,
+  nama, PIN), pengacak lemah yang di-seed jam (mulberry32, mirip modul `random`), dan bocor (termasuk menampilkan entropy
+  yang disimpan app ini di browser). Hasilnya dibandingkan dengan entropy kuat 2^128. Demo ini hanya mencocokkan entropy
+  frasa buatan app sendiri, tidak memeriksa alamat atau saldo dompet apa pun.
+
 Hasilnya ditampilkan di bawah: urutan huruf, kata per baris, dan gabungan dengan spasi (masing-masing bisa disalin).
 
 `bip39.js` sudah diuji dengan test vector resmi BIP-39 (misal entropy `00…00` → `abandon … about`).

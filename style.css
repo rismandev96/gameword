@@ -149,7 +149,14 @@ select {
 }
 .tab span { font-weight: 400; font-size: 13px; color: var(--dim); margin-left: 4px; }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
-.mode-vocab .only-speak, .mode-speak .only-vocab { display: none !important; }
+.mode-vocab .only-speak, .mode-speak .only-vocab,
+.mode-weak .only-vocab, .mode-weak .only-speak,
+.mode-vocab .only-weak, .mode-speak .only-weak { display: none !important; }
+.mode-weak .count { display: none; }
+.mode-weak .layout { grid-template-columns: minmax(0, 1fr); }
+.mode-weak .slots { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.mode-weak .slot .word { font-size: 18px; }
+@media (max-width: 860px) { .mode-weak .slots { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .mode-speak .layout { grid-template-columns: minmax(0, 1fr); }
 .mode-speak .slots { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -221,3 +228,27 @@ code.break { word-break: break-all; }
 .hx small { font: 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }
 
 body.busy, body.busy button { cursor: progress; }
+
+/* tab entropy lemah */
+.weak-panel { background: var(--panel); border-radius: var(--radius); padding: 14px; margin-bottom: 16px; border: 1px solid rgba(224, 96, 94, 0.35); }
+.weak-body p { margin: 6px 0; }
+.weak-body select, .weak-body input[type=text] {
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; outline: none;
+}
+.weak-body input[type=text] { flex: 1 1 220px; min-width: 0; }
+.weak-body input[type=text]:focus { border-color: var(--accent); }
+.attack-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+.btn.danger { background: #e0605e; color: #fff; border-color: transparent; font-weight: 600; }
+.btn.danger:hover { filter: brightness(1.08); }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.attack { margin-top: 12px; }
+.attack .progress-bar { height: 6px; background: var(--card); border-radius: 99px; overflow: hidden; margin: 6px 0; }
+.attack .progress-bar span { display: block; height: 100%; background: #e0605e; transition: width .1s; }
+.compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 10px; }
+.compare > div { background: var(--card); border-radius: 8px; padding: 10px 12px; }
+.compare > div:first-child { border-left: 3px solid #e0605e; }
+.compare > div:last-child { border-left: 3px solid #3fb27f; }
+.compare p { margin: 4px 0 0; }
+.leak-list { margin: 6px 0 12px; padding-left: 20px; }
+.leak-list li { margin: 3px 0; }
+td.break, .mono.break { word-break: break-all; }
